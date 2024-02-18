@@ -195,9 +195,9 @@ for epoch in range(100):
         loss.backward()
         batch_losses.append(loss.item())
         optimizer.step()
-        np.save(f"losses/train_losses_batch{batch_num}_epoch{epoch}.npy", batch_losses)
         print('\tEpoch %d | Batch %d | Loss %6.2f' % (epoch, batch_num, loss.item()))
     batch_losses = np.array(batch_losses)
+    np.save(f"losses/train_losses_batch{batch_num}_epoch{epoch}.npy", batch_losses)
     print('Epoch %d | Mean Loss %6.2f' % (epoch, sum(batch_losses)/len(batch_losses)))
 
 
