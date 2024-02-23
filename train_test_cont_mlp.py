@@ -10,7 +10,7 @@ import os
 import sys
 import pandas as pd
 import math
-
+from utils_v import compute_age_mae_r2
 from cmath import isinf
 import torch.nn.functional as F
 
@@ -184,14 +184,13 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 model.train()
 for epoch in range(100):
     batch_losses = []
-    for batch_num, input_data in enumerate(train_loader):
+    for batch_num, (mat, age) in enumerate(train_loader):
         optimizer.zero_grad()
-        x, y = input_data
-        x = x.to(device).float()
-        y = y.to(device)
+        mat = mat.to(device).float()
+        age = age.to(device)
 
-        out_feat = model(x)
-        loss = criterion(out_feat,y)
+        out_feat = model(mat)
+        loss = criterion(out_feat,age)
         loss.backward()
         batch_losses.append(loss.item())
         optimizer.step()
@@ -206,17 +205,21 @@ model.eval()
 with torch.no_grad():
     total_loss = 0
     total_samples = 0
-    for batch_num, input_data in enumerate(test_loader):
-        x, y = input_data
-        x = x.to(device).float()
-        y = y.to(device)
+    for batch_num, (mat, age) in enumerate(test_loader):
+        mat = mat.to(device).float()
+        age = age.to(device)
 
-        out_feat = model(x)
-        loss = criterion(out_feat, y)
+        out_feat = model(mat)
+        loss = criterion(out_feat, age)
         test_losses.append(loss.item())
-        total_loss += loss.item() * x.size(0)
-        total_samples += x.size(0)
+        total_loss += loss.item() * mat.size(0)
+        total_samples += mat.size(0)
     test_losses =np.array(test_losses)
     average_loss = total_loss / total_samples
     print('Mean Test Loss: %6.2f' % (average_loss))
     np.save(f"losses/test_losses_batch{batch_num}.npy", test_losses)
+
+# estimate age from the embeddings and compute MAE
+mae_train, r2_train, mae_test, r2_test = compute_age_mae_r2(model, train_loader, test_loader, device)
+print(f"Train Age MAE: {mae_train}, Test Age MAE: {mae_test}.")
+print(f"Train Age R2: {r2_train}, Test Age R2: {r2_test}.")
