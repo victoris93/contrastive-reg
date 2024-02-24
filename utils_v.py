@@ -111,18 +111,16 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = True
     torch.manual_seed(seed)
 
-def save_model(model, optimizer, opt, epoch, save_file):
+def save_model(model, cv_fold, optimizer, save_file):
     print('==> Saving...')
     state_dict = model.state_dict()
     if torch.cuda.device_count() > 1:
         state_dict = model.module.state_dict()
 
     state = {
-        'opts': opt,
         'model': state_dict,
         'optimizer': optimizer.state_dict(),
-        'epoch': epoch,
-        'run_id': wandb.run.id
+        'cv_fold': cv_fold
     }
     torch.save(state, save_file)
     del state
@@ -180,6 +178,16 @@ def compute_age_mae_r2(model, train_loader, test_loader, device): # test_int, te
     # mae_ext = age_estimator.score(ext_X, ext_y)
 
     return mae_train, r2_train, mae_test, r2_test # mae, r2 for train and test
+
+@torch.no_grad()
+def estimate_age(model, train_loader, test_loader, device):
+    age_estimator = estimators.AgeEstimator()
+    X_train, y_train = gather_age_feats(model, train_loader, device)
+    age_estimator.fit(X_train, y_train)
+    y_pred_train = age_estimator.predict(X_train)
+    X_test, y_test = gather_age_feats(model, test_loader, device)
+    y_pred_test = age_estimator.predict(X_test)
+    return y_train, y_test, y_pred_train, y_pred_test
 
 
 @torch.no_grad()
