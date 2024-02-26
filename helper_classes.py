@@ -13,20 +13,35 @@ import math
 from cmath import isinf
 
 
+# def gaussian_kernel(x):
+#     x = x - x.T
+#     return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
 
-krnl_sigma = 1
+def gaussian_kernel(X, krnl_sigma=1.0):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2))) / (math.sqrt(2 * math.pi * krnl_sigma**2))
+    return K
 
-def gaussian_kernel(x):
-    x = x - x.T
-    return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
+# def rbf(x):
+#         x = x - x.T
+#         return torch.exp(-(x**2)/(2*(krnl_sigma**2)))
 
-def rbf(x):
-        x = x - x.T
-        return torch.exp(-(x**2)/(2*(krnl_sigma**2)))
+def rbf(X, krnl_sigma=1.0):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2)))
+    return K
 
-def cauchy(x):
-        x = x - x.T
-        return  1. / (krnl_sigma*(x**2) + 1)
+# def cauchy(x):
+#         x = x - x.T
+#         return  1. / (krnl_sigma*(x**2) + 1)
+    
+def cauchy(X, krnl_sigma=1.0):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = 1. / (krnl_sigma * dists_sq + 1)
+    return K
 
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
@@ -78,7 +93,7 @@ class KernelizedSupCon(nn.Module):
         batch_size = features.shape[0]
 
         if labels is not None:
-            labels = labels.view(-1, 1)
+        #    labels = labels.view(-1, 1)
             if labels.shape[0] != batch_size:
                 raise ValueError('Num of labels does not match num of features')
             
@@ -126,29 +141,50 @@ class KernelizedSupCon(nn.Module):
         loss = - (self.temperature / self.base_temperature) * log_prob
         return loss.mean()
 
+# class MatData(Dataset):
+#     def __init__(self, path_mat, path_dm, target):
+#         self.matrices = np.load(path_mat)
+#         self.target = pd.read_csv(path_dm)[target].values
+#     def __len__(self):
+#         return len(self.matrices)
+#     def __getitem__(self, idx):
+#         matrix = self.matrices[idx]
+#         target = self.target[idx]
+#         matrix = torch.from_numpy(matrix).float()
+#         target = torch.tensor(target, dtype=torch.float32)
+#         return matrix, target
+    
+
 class MatData(Dataset):
-    def __init__(self, path_mat, path_dm):
-        self.matrices = np.load(path_mat)
-        self.target = pd.read_csv(path_dm)['age'].values
+    def __init__(self, path_feat, path_target):
+        self.features = np.load(path_feat)
+        self.target = np.load(path_target)
     def __len__(self):
-        return len(self.matrices)
+        return len(self.features)
     def __getitem__(self, idx):
-        matrix = self.matrices[idx]
+        features = self.features[idx]
         target = self.target[idx]
-        matrix = torch.from_numpy(matrix).float()
-        target = torch.tensor(target, dtype=torch.float32)
-        return matrix, target
+        features = torch.from_numpy(features).float()
+        target = torch.from_numpy(target).float()
+        return features, target
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
+    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
         super(MLP, self).__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+        self.feat_mlp = nn.Sequential(
+            nn.Linear(input_dim_feat, hidden_dim_feat),
             nn.ReLU(), # add more layers?
-            nn.Linear(hidden_dim, output_dim)
+            nn.Linear(hidden_dim_feat, output_dim)
+        )
+        self.target_mlp = nn.Sequential(
+            nn.Linear(input_dim_target, hidden_dim_target),
+            nn.ReLU(), # add more layers?
+            nn.Linear(hidden_dim_target, output_dim)
         )
     
-    def forward(self, x):
-        features = self.network(x)
-        normalized_features = nn.functional.normalize(features, p=2, dim=1)
-        return normalized_features
+    def forward(self, x, y):
+        features = self.feat_mlp(x)
+        targets = self.target_mlp(y)
+        features = nn.functional.normalize(features, p=2, dim=1)
+        targets = nn.functional.normalize(targets, p=2, dim=1)
+        return features, targets
