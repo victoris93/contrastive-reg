@@ -17,7 +17,7 @@ from cmath import isinf
 #     x = x - x.T
 #     return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
 
-def gaussian_kernel(X, krnl_sigma=1.0):
+def gaussian_kernel(X, krnl_sigma=0.1):
     norms = (X**2).sum(dim=1, keepdim=True)
     dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
     K = torch.exp(-dists_sq / (2 * (krnl_sigma**2))) / (math.sqrt(2 * math.pi * krnl_sigma**2))
