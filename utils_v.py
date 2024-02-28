@@ -150,42 +150,41 @@ def warmup_learning_rate(args, epoch, batch_id, total_batches, optimizer):
             param_group['lr'] = lr
 
 @torch.no_grad()
-def gather_age_feats(model, dataloader, device):
+def gather_feats_targets(model, dataloader, device):
     features = []
-    age_labels = []
+    targets = []
 
     model.eval()
-    for idx, (mat, labels) in enumerate(dataloader):
-        if isinstance(mat, list):
-            mat = mat[0]
-        mat = mat.to(device)
-        features.append(model(mat))
-        age_labels.append(labels)
+    for idx, (feat, target) in enumerate(dataloader):
+        if isinstance(feat, list):
+            feat = feat[0]
+        feat = feat.to(device)
+        target = target.to(device)
+        out_feat, out_target = model(feat, target)
+        features.append(out_feat)
+        targets.append(out_target)
     
-    return torch.cat(features, 0).cpu().numpy(), torch.cat(age_labels, 0).cpu().numpy()
+    return torch.cat(features, 0).cpu().numpy(), torch.cat(targets, 0).cpu().numpy()
 
 @torch.no_grad()
-def compute_age_mae_r2(model, train_loader, test_loader, device): # test_int, test_ext, opts
-    age_estimator = estimators.AgeEstimator()
+def compute_target_score(model, train_loader, test_loader, device, scoring):
+    age_estimator = estimators.TargetEstimator()
 
-    print("Training age estimator")
-    train_X, train_y = gather_age_feats(model, train_loader, device)
-    mae_train, r2_train = age_estimator.fit(train_X, train_y)
-    X_test, y_test = gather_age_feats(model, test_loader, device)
-    #ext_X, ext_y = gather_age_feats(model, test_ext, opts)
-    mae_test = age_estimator.score(X_test, y_test)
-    r2_test = age_estimator.r2(X_test, y_test)
-    # mae_ext = age_estimator.score(ext_X, ext_y)
+    print("Training target estimator")
+    train_X, train_y = gather_feats_targets(model, train_loader, device)
+    score_train = age_estimator.fit(train_X, train_y, scoring)
+    X_test, y_test = gather_feats_targets(model, test_loader, device)
+    score_test = age_estimator.score(X_test, y_test, scoring)
 
-    return mae_train, r2_train, mae_test, r2_test # mae, r2 for train and test
+    return score_train, score_test # mae, r2 for train and test
 
 @torch.no_grad()
-def estimate_age(model, train_loader, test_loader, device):
-    age_estimator = estimators.AgeEstimator()
-    X_train, y_train = gather_age_feats(model, train_loader, device)
+def estimate_target(model, train_loader, test_loader, device):
+    age_estimator = estimators.TargetEstimator()
+    X_train, y_train = gather_feats_targets(model, train_loader, device)
     age_estimator.fit(X_train, y_train)
     y_pred_train = age_estimator.predict(X_train)
-    X_test, y_test = gather_age_feats(model, test_loader, device)
+    X_test, y_test = gather_feats_targets(model, test_loader, device)
     y_pred_test = age_estimator.predict(X_test)
     return y_train, y_test, y_pred_train, y_pred_test
 

@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 from cmath import isinf
 import torch.nn.functional as F
-import seaborn as sns
 from torch.utils.data import Dataset, DataLoader, Subset
 import numpy as np
 import matplotlib.pyplot as plt
@@ -19,7 +18,43 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import mean_absolute_percentage_error, r2_score
 from helper_classes import MatData, KernelizedSupCon, MLP, cauchy, rbf, gaussian_kernel
 
-dataset = MatData("vectorized_matrices_la5c.npy", "hopkins.npy")
+def gaussian_kernel(X, krnl_sigma=0.5):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2))) / (math.sqrt(2 * math.pi * krnl_sigma**2))
+    return K
+
+# def rbf(x):
+#         x = x - x.T
+#         return torch.exp(-(x**2)/(2*(krnl_sigma**2)))
+
+def rbf(X, krnl_sigma=0.1):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2)))
+    return K
+
+# def cauchy(x):
+#         x = x - x.T
+#         return  1. / (krnl_sigma*(x**2) + 1)
+    
+def cauchy(X, krnl_sigma=0.1):
+    norms = (X**2).sum(dim=1, keepdim=True)
+    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
+    K = 1. / (krnl_sigma * dists_sq + 1)
+    return K
+
+
+dataset = MatData("vectorized_matrices_la5c.npy", "hopkins_age.npy")
+
+temperature = 0.02
+base_temperature = 0.02
+lr = 1
+kernel = gaussian_kernel
+batch_size = 5
+n_splits = 5
+
+
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
 train_indices, test_indices = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
@@ -27,13 +62,15 @@ train_dataset = Subset(dataset, train_indices)
 test_dataset = Subset(dataset, test_indices)
 
 input_dim_feat = 499500 # vectorized mat, diagonal discarded
-input_dim_target = 58
-hidden_dim_feat = 512
-hidden_dim_target = 24
+input_dim_target = 59
+hidden_dim_feat_1 = 1024
+hidden_dim_feat_2 = 512
+hidden_dim_target_1 = 24
+hidden_dim_target_2 = 8
 output_dim = 2
+num_epochs = 1000
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 results_cv = []
 best_mae = np.inf
@@ -45,14 +82,12 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(train_dataset)):
     train_subsampler = torch.utils.data.SubsetRandomSampler(train_idx)
     val_subsampler = torch.utils.data.SubsetRandomSampler(val_idx)
     
-    train_loader = DataLoader(train_dataset, batch_size=5, sampler=train_subsampler)
-    val_loader = DataLoader(train_dataset, batch_size=5, sampler=val_subsampler)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_subsampler)
+    val_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=val_subsampler)
     
-    model = MLP(input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim).to(device)
-    criterion = KernelizedSupCon(method='expw', temperature = 1000, base_temperature = 0.1, kernel=gaussian_kernel)
-    optimizer = optim.Adam(model.parameters(), lr=0.1)
-    
-    num_epochs = 1000
+    model = MLP(input_dim_feat, input_dim_target, hidden_dim_feat_1, hidden_dim_feat_2, hidden_dim_target_1, hidden_dim_target_2, output_dim).to(device)
+    criterion = KernelizedSupCon(method='expw', temperature = temperature, base_temperature = base_temperature, kernel=kernel)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     
     for epoch in range(num_epochs):
         model.train()
@@ -94,18 +129,15 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(train_dataset)):
         save_model(model, fold, optimizer, f"best_model_hopkins_cv.pt")
     results_cv.append([fold, mae_train, r2_train, mae_val, r2_val])
 
-results_df = pd.DataFrame(results_cv, columns=['Fold', 'Train_MAPE', 'Train_R2', 'Val_MAPE', 'Val_R2'])
-results_df.to_csv('cv_results_hopkins.csv', index=False)
-
 # Testing on train
 
 test_loader = DataLoader(test_dataset, batch_size=5, shuffle=False)
 train_loader = DataLoader(train_dataset, batch_size=5, shuffle=True)
 
-model = MLP(input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim)
+model = MLP(input_dim_feat, input_dim_target, hidden_dim_feat_1, hidden_dim_feat_2, hidden_dim_target_1, hidden_dim_target_2, output_dim)
 model.load_state_dict(torch.load('best_model_hopkins_cv.pt')["model"])
-criterion = KernelizedSupCon(method='expw', temperature = 1000, base_temperature = 0.1, kernel=gaussian_kernel)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+criterion = KernelizedSupCon(method='expw', temperature = temperature, base_temperature = base_temperature, kernel=kernel)
+optimizer = optim.Adam(model.parameters(), lr=lr)
 optimizer.load_state_dict(torch.load('best_model_hopkins_cv.pt')["optimizer"])
 
 model.to(device)
@@ -131,6 +163,7 @@ with torch.no_grad():
     test_losses =np.array(test_losses)
     average_loss = total_loss / total_samples
     print('Mean Test Loss: %6.2f' % (average_loss))
+    #np.save(f"losses/test_losses_batch{batch_num}.npy", test_losses)
 
 emb_features = np.row_stack(emb_features)
 emb_targets = np.row_stack(emb_targets)

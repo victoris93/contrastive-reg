@@ -17,7 +17,7 @@ from cmath import isinf
 #     x = x - x.T
 #     return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
 
-def gaussian_kernel(X, krnl_sigma=0.1):
+def gaussian_kernel(X, krnl_sigma=1.0):
     norms = (X**2).sum(dim=1, keepdim=True)
     dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
     K = torch.exp(-dists_sq / (2 * (krnl_sigma**2))) / (math.sqrt(2 * math.pi * krnl_sigma**2))
@@ -94,6 +94,7 @@ class KernelizedSupCon(nn.Module):
 
         if labels is not None:
         #    labels = labels.view(-1, 1)
+#             labels = labels.contiguous()
             if labels.shape[0] != batch_size:
                 raise ValueError('Num of labels does not match num of features')
             
@@ -169,17 +170,21 @@ class MatData(Dataset):
         return features, target
 
 class MLP(nn.Module):
-    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
+    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat_1, hidden_dim_feat_2, hidden_dim_target_1, hidden_dim_target_2, output_dim):
         super(MLP, self).__init__()
         self.feat_mlp = nn.Sequential(
-            nn.Linear(input_dim_feat, hidden_dim_feat),
+            nn.Linear(input_dim_feat, hidden_dim_feat_1),
             nn.ReLU(), # add more layers?
-            nn.Linear(hidden_dim_feat, output_dim)
+            nn.Linear(hidden_dim_feat_1, hidden_dim_feat_2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim_feat_2, output_dim)
         )
         self.target_mlp = nn.Sequential(
-            nn.Linear(input_dim_target, hidden_dim_target),
+            nn.Linear(input_dim_target, hidden_dim_target_1),
             nn.ReLU(), # add more layers?
-            nn.Linear(hidden_dim_target, output_dim)
+            nn.Linear(hidden_dim_target_1, hidden_dim_target_2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim_target_2, output_dim)
         )
     
     def forward(self, x, y):
