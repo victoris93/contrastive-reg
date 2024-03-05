@@ -17,31 +17,31 @@ from cmath import isinf
 #     x = x - x.T
 #     return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
 
-def gaussian_kernel(X, krnl_sigma=1.0):
-    norms = (X**2).sum(dim=1, keepdim=True)
-    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
-    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2))) / (math.sqrt(2 * math.pi * krnl_sigma**2))
-    return K
+def gaussian_kernel(x, krnl_sigma = 0.5):
+    x1 = x[:, :1] - x[:, :1].T
+    x2 = x[:, 1:2] - x[:, 1:2].T
+    x = x1**2 + x2**2
+    return torch.exp(-x / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
 
 # def rbf(x):
 #         x = x - x.T
 #         return torch.exp(-(x**2)/(2*(krnl_sigma**2)))
 
-def rbf(X, krnl_sigma=1.0):
-    norms = (X**2).sum(dim=1, keepdim=True)
-    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
-    K = torch.exp(-dists_sq / (2 * (krnl_sigma**2)))
-    return K
+def rbf(X, krnl_sigma=0.5):
+    x1 = x[:, :1] - x[:, :1].T
+    x2 = x[:, 1:2] - x[:, 1:2].T
+    x = x1**2 + x2**2
+    return torch.exp(-x/(2*(krnl_sigma**2)))
 
 # def cauchy(x):
 #         x = x - x.T
 #         return  1. / (krnl_sigma*(x**2) + 1)
     
-def cauchy(X, krnl_sigma=1.0):
-    norms = (X**2).sum(dim=1, keepdim=True)
-    dists_sq = norms + norms.T - 2.0 * torch.mm(X, X.T)
-    K = 1. / (krnl_sigma * dists_sq + 1)
-    return K
+def cauchy(X, krnl_sigma=0.5):
+    x1 = x[:, :1] - x[:, :1].T
+    x2 = x[:, 1:2] - x[:, 1:2].T
+    x = x1**2 + x2**2
+    return 1. / (krnl_sigma*x + 1)
 
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
@@ -169,24 +169,43 @@ class MatData(Dataset):
         target = torch.from_numpy(target).float()
         return features, target
 
+# class MLP(nn.Module):
+#     def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat_1, hidden_dim_feat_2, hidden_dim_target_1, hidden_dim_target_2, output_dim):
+#         super(MLP, self).__init__()
+#         self.feat_mlp = nn.Sequential(
+#             nn.Linear(input_dim_feat, hidden_dim_feat_1),
+#             nn.BatchNorm1d(hidden_dim_feat_1),
+#             nn.ReLU(), # add more layers?
+#             nn.Linear(hidden_dim_feat_1, hidden_dim_feat_2),
+#             nn.BatchNorm1d(hidden_dim_feat_2),
+#             nn.ReLU(),
+#             nn.Linear(hidden_dim_feat_2, output_dim)
+#         )
+#         self.target_mlp = nn.Sequential(
+#             nn.Linear(input_dim_target, hidden_dim_target_1),
+#             nn.BatchNorm1d(hidden_dim_target_1),
+#             nn.ReLU(), # add more layers?
+#             nn.Linear(hidden_dim_target_1, hidden_dim_target_2),
+#             nn.BatchNorm1d(hidden_dim_target_2),
+#             nn.ReLU(),
+#             nn.Linear(hidden_dim_target_2, output_dim)
+#         )
+
 class MLP(nn.Module):
-    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat_1, hidden_dim_feat_2, hidden_dim_target_1, hidden_dim_target_2, output_dim):
+    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
         super(MLP, self).__init__()
         self.feat_mlp = nn.Sequential(
-            nn.Linear(input_dim_feat, hidden_dim_feat_1),
+            nn.Linear(input_dim_feat, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(), # add more layers?
-            nn.Linear(hidden_dim_feat_1, hidden_dim_feat_2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim_feat_2, output_dim)
+            nn.Linear(hidden_dim_feat, output_dim)
         )
         self.target_mlp = nn.Sequential(
-            nn.Linear(input_dim_target, hidden_dim_target_1),
+            nn.Linear(input_dim_target, hidden_dim_target),
+            nn.BatchNorm1d(hidden_dim_target),
             nn.ReLU(), # add more layers?
-            nn.Linear(hidden_dim_target_1, hidden_dim_target_2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim_target_2, output_dim)
+            nn.Linear(hidden_dim_target, output_dim)
         )
-    
     def forward(self, x, y):
         features = self.feat_mlp(x)
         targets = self.target_mlp(y)
