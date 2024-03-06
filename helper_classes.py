@@ -198,12 +198,14 @@ class MLP(nn.Module):
             nn.Linear(input_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(), # add more layers?
+            nn.Dropout(p=0.3),
             nn.Linear(hidden_dim_feat, output_dim)
         )
         self.target_mlp = nn.Sequential(
             nn.Linear(input_dim_target, hidden_dim_target),
             nn.BatchNorm1d(hidden_dim_target),
             nn.ReLU(), # add more layers?
+            nn.Dropout(p=0.3),
             nn.Linear(hidden_dim_target, output_dim)
         )
     def forward(self, x, y):
