@@ -5,10 +5,44 @@ import random
 import numpy as np
 import os
 # import wandb
+from sklearn.decomposition import PCA
+from torch.utils.data import TensorDataset
 import torch.nn.functional as F
+import torch.nn as nn
 import estimators
 from pathlib import Path
 
+def standardize_dataset(dataset):
+    features = torch.vstack([dataset[i][0] for i in range(len(dataset))])
+    targets = torch.vstack([dataset[i][1] for i in range(len(dataset))])
+    
+    features_mean = features.mean(dim=0)
+    features_std = features.std(dim=0)
+    targets_mean = targets.mean(dim=0)
+    targets_std = targets.std(dim=0)
+    
+    features_std[features_std == 0] = 1
+    targets_std[targets_std == 0] = 1
+    
+    standardized_features = (features - features_mean) / features_std
+    standardized_targets = (targets - targets_mean) / targets_std
+    
+    standardized_dataset = TensorDataset(standardized_features, standardized_targets)
+    
+    return standardized_dataset
+
+def pca_labels(dataset, n_components):
+    features = torch.vstack([dataset[i][0] for i in range(len(dataset))])
+    targets = torch.vstack([dataset[i][1] for i in range(len(dataset))])
+
+    targets_np = targets.numpy()
+    pca = PCA(n_components=n_components)
+    reduced_labels_np = pca.fit_transform(targets_np)
+    reduced_labels = torch.tensor(reduced_labels_np, dtype=torch.float32)
+    reduced_labels = nn.functional.normalize(reduced_labels, p=2, dim=1)
+    dataset = TensorDataset(features, reduced_labels)
+
+    return dataset
 
 class NViewTransform:
     """Create N augmented views of the same image"""
@@ -160,9 +194,9 @@ def gather_feats_targets(model, dataloader, device):
             feat = feat[0]
         feat = feat.to(device)
         target = target.to(device)
-        out_feat, out_target = model(feat, target)
+        out_feat= model(feat)
         features.append(out_feat)
-        targets.append(out_target)
+        targets.append(target)
     
     return torch.cat(features, 0).cpu().numpy(), torch.cat(targets, 0).cpu().numpy()
 
@@ -180,12 +214,12 @@ def compute_target_score(model, train_loader, test_loader, device, scoring):
 
 @torch.no_grad()
 def estimate_target(model, train_loader, test_loader, device):
-    age_estimator = estimators.TargetEstimator()
+    estimator = estimators.TargetEstimator()
     X_train, y_train = gather_feats_targets(model, train_loader, device)
-    age_estimator.fit(X_train, y_train)
-    y_pred_train = age_estimator.predict(X_train)
+    estimator.fit(X_train, y_train)
+    y_pred_train = estimator.predict(X_train)
     X_test, y_test = gather_feats_targets(model, test_loader, device)
-    y_pred_test = age_estimator.predict(X_test)
+    y_pred_test = estimator.predict(X_test)
     return y_train, y_test, y_pred_train, y_pred_test
 
 
