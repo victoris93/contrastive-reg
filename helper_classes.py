@@ -43,6 +43,40 @@ def cauchy(X, krnl_sigma=0.5):
     x = x1**2 + x2**2
     return 1. / (krnl_sigma*x + 1)
 
+class CustomContrastiveLoss(nn.Module):
+    def __init__(self, sigma):
+        super(CustomContrastiveLoss, self).__init__()
+#         self.margin = margin 
+        self.sigma = sigma 
+    
+    def gaussian_kernel(self, x, y):
+        # squared Euclidean distance
+        squared_dist = torch.sum((x - y) ** 2, dim=1)
+        # Apply the Gaussian kernel
+        return torch.exp(-squared_dist / (2 * self.sigma ** 2))
+
+    def forward(self, features, targets):
+        # Gaussian kernel for the positive pairs
+        positive_kernel = self.gaussian_kernel(features, targets)
+
+        batch_size = features.shape[0]
+        repulsion_loss = 0.0
+        for i in range(batch_size):
+            for j in range(batch_size):
+                if i != j:
+                    #Gaussian kernel for distances to features and targets
+                    kernel_to_features = self.gaussian_kernel(targets[i].unsqueeze(0), features[j].unsqueeze(0))
+                    kernel_to_targets = self.gaussian_kernel(targets[i].unsqueeze(0), targets[j].unsqueeze(0))
+                    
+                    repulsion_loss += kernel_to_features + kernel_to_targets
+
+        attraction_loss = 1-positive_kernel.mean()
+        repulsion_loss = repulsion_loss / (batch_size * (batch_size - 1))  # Normalize by the number of negative pairs
+        # Total loss
+        total_loss = attraction_loss + repulsion_loss
+
+        return total_loss
+
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR
@@ -193,6 +227,7 @@ class MatData(Dataset):
 
 class MLP(nn.Module):
     def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
+#     def __init__(self, input_dim_feat, hidden_dim_feat, output_dim):
         super(MLP, self).__init__()
         self.feat_mlp = nn.Sequential(
             nn.Linear(input_dim_feat, hidden_dim_feat),
@@ -208,6 +243,7 @@ class MLP(nn.Module):
             nn.Dropout(p=0.3),
             nn.Linear(hidden_dim_target, output_dim)
         )
+        
     def forward(self, x, y):
         features = self.feat_mlp(x)
         targets = self.target_mlp(y)

@@ -6,9 +6,7 @@ import numpy as np
 import os
 # import wandb
 from sklearn.decomposition import PCA
-from torch.utils.data import TensorDataset
 import torch.nn.functional as F
-import torch.nn as nn
 import estimators
 from pathlib import Path
 
@@ -194,9 +192,9 @@ def gather_feats_targets(model, dataloader, device):
             feat = feat[0]
         feat = feat.to(device)
         target = target.to(device)
-        out_feat= model(feat)
+        out_feat, out_target= model(feat, target)
         features.append(out_feat)
-        targets.append(target)
+        targets.append(out_target)
     
     return torch.cat(features, 0).cpu().numpy(), torch.cat(targets, 0).cpu().numpy()
 

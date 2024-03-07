@@ -13,23 +13,33 @@ import sys
 import pandas as pd
 import math
 from cmath import isinf
-from utils_v import pca_labels, standardize_dataset, MatData
+from helper_classes import MatData, CustomContrastiveLoss
+from utils_v import standardize_dataset
 
 dataset = MatData("vectorized_matrices_la5c.npy", "hopkins_age.npy")
 train_indices, test_indices = train_test_split(np.arange(len(dataset)), test_size = 0.2, random_state=42) #train_size = 5
 train_dataset = Subset(dataset, train_indices)
 test_dataset = Subset(dataset, test_indices)
 
+standardized_train_dataset = standardize_dataset(train_dataset)
+std_train_loader = DataLoader(standardized_train_dataset, batch_size=10, shuffle=True)
+
+standardized_test_dataset = standardize_dataset(test_dataset)
+std_test_loader = DataLoader(standardized_test_dataset, batch_size=10, shuffle=True)
+
 def define_model(trial):
         
     dropout_rate = trial.suggest_float('dropout_rate',0.1, 0.5, step = 0.1)
     hidden_dim_feat = trial.suggest_int('hidden_dim_feat', 100, 1000, step = 200)
+    hiddem_dim_target = 24
     input_dim_feat = 499500
+    input_dim_target = 59
     output_dim = 2
 
 
     class MLP(nn.Module):
-        def __init__(self, input_dim_feat, hidden_dim_feat, output_dim):
+        def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
+    #     def __init__(self, input_dim_feat, hidden_dim_feat, output_dim):
             super(MLP, self).__init__()
             self.feat_mlp = nn.Sequential(
                 nn.Linear(input_dim_feat, hidden_dim_feat),
@@ -38,46 +48,79 @@ def define_model(trial):
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(hidden_dim_feat, output_dim)
             )
-
-        def forward(self, x):
+            self.target_mlp = nn.Sequential(
+                nn.Linear(input_dim_target, hidden_dim_target),
+                nn.BatchNorm1d(hidden_dim_target),
+                nn.ReLU(), # add more layers?
+                nn.Dropout(p=dropout_rate),
+                nn.Linear(hidden_dim_target, output_dim)
+            )
+            
+        def forward(self, x, y):
             features = self.feat_mlp(x)
+            targets = self.target_mlp(y)
             features = nn.functional.normalize(features, p=2, dim=1)
-            return features
+            targets = nn.functional.normalize(targets, p=2, dim=1)
+            return features, targets
         
-    return MLP(input_dim_feat, hidden_dim_feat, output_dim)
+    return MLP(input_dim_feat, input_dim_target, hidden_dim_feat, hiddem_dim_target, output_dim)
     
-def objective(trial, train_loader, test_loader):
+def objective(trial, train_loader, test_loader, num_epochs):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = define_model(trial)
     model.to(device)
-
+    sigma = trial.suggest_float('sigma', 0.1, 1.0, step = 0.1)
     lr = trial.suggest_float('lr', 1e-5, 1e-1)
     weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-1)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Training of the model.
-    for epoch in range(10):
+    criterion = CustomContrastiveLoss(sigma = sigma)
+
+    for epoch in range(num_epochs):
         model.train()
-        for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.cuda(), target.cuda()
+        batch_losses = []
+        for batch_num, (features, targets) in enumerate(train_loader):
+            features, targets = features.to(device), targets.to(device)
             optimizer.zero_grad()
-            output = model(data)
-            loss = F.cross_entropy(output, target)
+            out_feat, out_target = model(features, targets)
+            loss = criterion(out_feat, out_target)
             loss.backward()
+            batch_losses.append(loss.item())
             optimizer.step()
-        # Validation of the model.
-        model.eval()
-        correct = 0
-        with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(val_loader):
-                data, target = data.cuda(), target.cuda()
-                output = model(data)
-                pred = output.argmax(dim=1, keepdim=True)
-                correct += pred.eq(target.view_as(pred)).sum().item()
-        accuracy = correct / len(val_loader.dataset)
-        trial.report(accuracy, epoch)
-        # Handle pruning based on the intermediate value.
-        if trial.should_prune():
-            raise optuna.TrialPruned()
-    return accuracy
+        print(f'Epoch {epoch} | Mean Loss {sum(batch_losses)/len(batch_losses)}')
+
+    model.eval()
+    test_losses = []
+    emb_features = [] # saving the embedded features for each batch
+    emb_targets = []
+    with torch.no_grad():
+        total_loss = 0
+        total_samples = 0
+        for batch_num, (features, targets) in enumerate(test_loader):
+            features = features.to(device).float()
+            targets = targets.to(device)
+
+            out_feat, out_target = model(features, targets)
+            emb_features.append(out_feat.cpu())
+            emb_targets.append(out_target.cpu())
+            loss = criterion(out_feat, out_target)
+            test_losses.append(loss.item())
+            total_loss += loss.item() * features.size(0)
+            total_samples += features.size(0)
+            
+        test_losses =np.array(test_losses)
+        average_loss = total_loss / total_samples
+        print('Mean Test Loss: %6.2f' % (average_loss))
+    return average_loss
+
+
+def main():
+    study = optuna.create_study(direction='minimize')
+    study.optimize(lambda trial: objective(trial, std_train_loader, std_test_loader,um_epochs=100), n_trials=100)
+    best_hyperparams = study.best_trial.params
+
+    with open('best_model/best_hyperparameters.json', 'w') as f:
+        json.dump(best_hyperparams, f)
+
+    print("Optimization complete. The best hyperparameters are saved in 'best_hyperparameters.json'")
