@@ -15,8 +15,10 @@ import math
 from cmath import isinf
 from helper_classes import MatData, CustomContrastiveLoss
 from utils_v import standardize_dataset
+import json
+import csv
 
-dataset = MatData("vectorized_matrices_la5c.npy", "hopkins_age.npy")
+dataset = MatData("vectorized_matrices_la5c.npy", "hopkins_covars.npy")
 train_indices, test_indices = train_test_split(np.arange(len(dataset)), test_size = 0.2, random_state=42) #train_size = 5
 train_dataset = Subset(dataset, train_indices)
 test_dataset = Subset(dataset, test_indices)
@@ -30,10 +32,10 @@ std_test_loader = DataLoader(standardized_test_dataset, batch_size=10, shuffle=T
 def define_model(trial):
         
     dropout_rate = trial.suggest_float('dropout_rate',0.1, 0.5, step = 0.1)
-    hidden_dim_feat = trial.suggest_int('hidden_dim_feat', 100, 1000, step = 200)
-    hiddem_dim_target = 24
+    hidden_dim_feat = trial.suggest_int('hidden_dim_feat', 100, 1100, step = 200)
+    hiddem_dim_target = 30
     input_dim_feat = 499500
-    input_dim_target = 59
+    input_dim_target = 60
     output_dim = 2
 
 
@@ -41,18 +43,20 @@ def define_model(trial):
         def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
     #     def __init__(self, input_dim_feat, hidden_dim_feat, output_dim):
             super(MLP, self).__init__()
+            self.hidden_dim_feat = hidden_dim_feat
+            self.dropout_rate = dropout_rate
             self.feat_mlp = nn.Sequential(
-                nn.Linear(input_dim_feat, hidden_dim_feat),
-                nn.BatchNorm1d(hidden_dim_feat),
+                nn.Linear(input_dim_feat, self.hidden_dim_feat),
+                nn.BatchNorm1d(self.hidden_dim_feat),
                 nn.ReLU(), # add more layers?
-                nn.Dropout(p=dropout_rate),
-                nn.Linear(hidden_dim_feat, output_dim)
+                nn.Dropout(p=self.dropout_rate),
+                nn.Linear(self.hidden_dim_feat, output_dim)
             )
             self.target_mlp = nn.Sequential(
                 nn.Linear(input_dim_target, hidden_dim_target),
                 nn.BatchNorm1d(hidden_dim_target),
                 nn.ReLU(), # add more layers?
-                nn.Dropout(p=dropout_rate),
+                nn.Dropout(p=self.dropout_rate),
                 nn.Linear(hidden_dim_target, output_dim)
             )
             
@@ -88,7 +92,7 @@ def objective(trial, train_loader, test_loader, num_epochs):
             loss.backward()
             batch_losses.append(loss.item())
             optimizer.step()
-        print(f'Epoch {epoch} | Mean Loss {sum(batch_losses)/len(batch_losses)}')
+        # print(f'Epoch {epoch} | Mean Loss {sum(batch_losses)/len(batch_losses)}')
 
     model.eval()
     test_losses = []
@@ -111,16 +115,38 @@ def objective(trial, train_loader, test_loader, num_epochs):
             
         test_losses =np.array(test_losses)
         average_loss = total_loss / total_samples
-        print('Mean Test Loss: %6.2f' % (average_loss))
+        print(f'Trial {trial}: Mean Test Loss: %6.2f' % (average_loss))
+
+        with open('results/optim_results.csv', 'a') as f:
+            # create the csv writer
+            writer = csv.writer(f)
+            # if the csv file is empty, write the header
+            if f.tell() == 0:
+                writer.writerow(['hidden_dim_feat',
+                                 'dropout_rate',
+                                 'sigma',
+                                 'lr',
+                                 'weight_decay',
+                                 'mean_test_loss'])
+                
+            writer.writerow([model.hidden_dim_feat,
+                             model.dropout_rate,
+                             sigma,
+                             lr,
+                             weight_decay,
+                            average_loss])
     return average_loss
 
 
 def main():
     study = optuna.create_study(direction='minimize')
-    study.optimize(lambda trial: objective(trial, std_train_loader, std_test_loader,um_epochs=100), n_trials=100)
+    study.optimize(lambda trial: objective(trial, std_train_loader, std_test_loader,num_epochs=100), n_trials=300)
     best_hyperparams = study.best_trial.params
 
     with open('best_model/best_hyperparameters.json', 'w') as f:
         json.dump(best_hyperparams, f)
 
     print("Optimization complete. The best hyperparameters are saved in 'best_hyperparameters.json'")
+
+if __name__ == "__main__":
+    main()
