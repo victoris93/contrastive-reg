@@ -71,7 +71,7 @@ def define_model(trial):
 def objective(trial, num_epochs):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    num_workers = 4 * torch.cuda.device_count() if torch.cuda.is_available() else 4
+    num_workers = 4 * torch.cuda.device_count() if torch.cuda.is_available() else -1
 
     model = define_model(trial)
     if torch.cuda.device_count() > 1:
@@ -83,7 +83,7 @@ def objective(trial, num_epochs):
     sigma = trial.suggest_float('sigma', 0.1, 1.0, step = 0.1)
     lr = trial.suggest_float('lr', 1e-5, 1e-1)
     weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-1)
-    batch_size = trial.suggest_int('batch_size', 5, 30, step = 5)
+    batch_size = 13
     optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'SGD', 'RMSprop'])
     if optimizer_name == 'Adam':
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -148,6 +148,12 @@ def objective(trial, num_epochs):
     print(f'MAPE on Train: {mape_train} | MAPE on Test: {mape_test}')
     print(f'R2 on Train: {r2_train} | R2 on Test: {r2_test}')
 
+    if torch.cuda.device_count() > 1:
+        hidden_dim_feat = get_model_attribute(model, 'hidden_dim_feat')
+        dropout_rate = get_model_attribute(model, 'dropout_rate')
+    else:
+        hidden_dim_feat = model.hidden_dim_feat
+        dropout_rate = model.dropout_rate
     with open('results/optim_results.csv', 'a') as f:
         # create the csv writer
         writer = csv.writer(f)
@@ -164,8 +170,8 @@ def objective(trial, num_epochs):
                                 'mape_test',
                                 'r2_test'])
             
-        writer.writerow([get_model_attribute(model, 'hidden_dim_feat'),
-                            get_model_attribute(model, 'dropout_rate'),
+        writer.writerow([hidden_dim_feat,
+                            dropout_rate,
                             sigma,
                             lr,
                             weight_decay,
@@ -181,7 +187,7 @@ def objective(trial, num_epochs):
 def main():
     db_file = "sqlite:///optuna_study.db"
     study = optuna.create_study(study_name="contrastive-optim",directions=['minimize', 'minimize', 'maximize'], storage=db_file, load_if_exists=True)
-    study.optimize(lambda trial: objective(trial, num_epochs=100), n_trials=1000)
+    study.optimize(lambda trial: objective(trial, num_epochs=100), n_trials=400)
     best_hyperparams = study.best_trial.params
 
     with open('results/best_hyperparameters.json', 'w') as f:
