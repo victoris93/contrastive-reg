@@ -226,23 +226,33 @@ class MatData(Dataset):
 #         )
 
 class MLP(nn.Module):
-    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim):
-#     def __init__(self, input_dim_feat, hidden_dim_feat, output_dim):
+    def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feat, hidden_dim_target, output_dim, dropout_rate):
         super(MLP, self).__init__()
+        
+        # Xavier initialization for feature MLP
         self.feat_mlp = nn.Sequential(
             nn.Linear(input_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(), # add more layers?
-            nn.Dropout(p=0.3),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_feat, output_dim)
         )
+        self.init_weights(self.feat_mlp)
+
+        # Xavier initialization for target MLP
         self.target_mlp = nn.Sequential(
             nn.Linear(input_dim_target, hidden_dim_target),
             nn.BatchNorm1d(hidden_dim_target),
-            nn.ReLU(), # add more layers?
-            nn.Dropout(p=0.3),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_target, output_dim)
         )
+        self.init_weights(self.target_mlp)
+        
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.constant_(m.bias, 0.0)
         
     def forward(self, x, y):
         features = self.feat_mlp(x)

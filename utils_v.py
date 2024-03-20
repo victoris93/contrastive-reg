@@ -190,8 +190,8 @@ def gather_feats_targets(model, dataloader, device):
 
     model.eval()
     for idx, (feat, target) in enumerate(dataloader):
-        if isinstance(feat, list):
-            feat = feat[0]
+        if len(feat.shape) > 2:
+            feat = feat[:, 0, :]
         feat = feat.to(device)
         target = target.to(device)
         out_feat, out_target= model(feat, target)
