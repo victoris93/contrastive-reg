@@ -1,9 +1,11 @@
 # %%
 import math
+import asyncio
 from pathlib import Path
 import gc
 from collections import defaultdict
 
+import submitit
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -13,7 +15,7 @@ import torch.nn as nn
 import torch.optim as optim
 from scipy.stats import pearsonr
 from sklearn.model_selection import (
-    train_test_split,
+    train_test_split, LearningCurveDisplay
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
@@ -305,37 +307,32 @@ def cauchy(x, krnl_sigma):
 
 # %%
 dataset = MatData(
-    data_path / "vectorized_matrices.npy", data_path / "participants.csv", "age"
+    data_path / "vectorized_matrices.npy",
+    data_path / "participants.csv",
+    "age"
 )
-# dataset = MatData(data_path, data_path / 'participants.csv', 'age')
-
 
 # %%
-thr = 0.99
+if False:
+    thr = 0.99
 
-X, y = list(zip(*dataset))
-X = torch.stack(X)
-y = torch.stack(y)
-thrs = torch.quantile(X, q=thr, dim=1)
-X_thr = X * (X >= thrs[:, None])
-transformed_dataset = TensorDataset(X_thr, y)
+    X, y = list(zip(*dataset))
+    X = torch.stack(X)
+    y = torch.stack(y)
+    thrs = torch.quantile(X, q=thr, dim=1)
+    X_thr = X * (X >= thrs[:, None])
+    transformed_dataset = TensorDataset(X_thr, y)
+    dataset = TensorDataset(X, y)
 
 # %%
-dataset = TensorDataset(X, y)
-
-# %%
-def train(train_dataset, test_dataset, model=None, device=device):
+def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 499500
     # the rest is arbitrary
     hidden_dim_feat = 1000
     input_dim_target = 1
     output_dim = 2
 
-    num_epochs = 100
-
     lr = 0.1  # too low values return nan loss
-    kernel = cauchy
-    batch_size = 32  # too low values return nan loss
     dropout_rate = 0
     weight_decay = 0
 
@@ -423,76 +420,140 @@ def train(train_dataset, test_dataset, model=None, device=device):
 
 # %% [markdown]
 # ## Learning curve
+
+def run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment ,random_state=None, device=device, dataset=None):
+    if not isinstance(random_state, np.random.RandomState):
+        random_state = np.random.RandomState(random_state)
+
+    if dataset is None:
+        dataset = MatData(
+            data_path / "vectorized_matrices.npy", data_path / "participants.csv",
+            "age"
+        )
+        X, y = list(zip(*dataset))
+        X = torch.stack(X)
+        y = torch.stack(y)
+        dataset = TensorDataset(X, y)
+
+    predictions = {}
+    losses = []
+    experiment_indices = random_state.choice(indices, experiment_size, replace=False)
+    train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
+    train_dataset = Subset(dataset, train_indices)
+    test_dataset = Subset(dataset, test_indices)
+    loss_terms, model = train(train_dataset, test_dataset)
+    losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
+    model.eval()
+    with torch.no_grad():
+        for label, d in (('train', train_dataset), ('test', test_dataset)):
+            X, y = zip(*d)
+            X = torch.stack(X).to(device)
+            y = torch.stack(y).to(device)
+            y_pred = model.decode_target(model.transform_feat(X))
+            predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
+    return train_indices, test_indices, model.cpu(), losses, predictions
+
+# %%
 random_state = np.random.RandomState(seed=42)
 
 test_ratio = .2
 test_size = int(test_ratio * len(dataset))
 indices = np.arange(len(dataset))
-experiments = 5
+experiments = 20
 
-predictions = {}
-losses = []
-for train_ratio in tqdm(np.linspace(.1, 1., 5)):
-    train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
-    experiment_size = test_size + train_size
-    for experiment in tqdm(range(experiments)):
-        experiment_indices = random_state.choice(indices, experiment_size, replace=False)
-        train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
-        train_dataset = Subset(dataset, train_indices)
-        test_dataset = Subset(dataset, test_indices)
-        loss_terms, model = train(train_dataset, test_dataset)
-        losses.append(loss_terms.eval("train_ratio = @train_ratio"))
-        model.eval()
-        with torch.no_grad():
-            for label, d in (('train', train_dataset), ('test', test_dataset)):
-                X, y = zip(*d)
-                X = torch.stack(X).to(device)
-                y = torch.stack(y).to(device)
-                y_pred = model.decode_target(model.transform_feat(X))
-                predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
+# %%
+log_folder = "log_training/%j"
+executor = submitit.AutoExecutor(folder=log_folder)
+executor.update_parameters(
+    timeout_min=20,
+    slurm_partition="parietal,gpu-best",
+    gpus_per_node=1,
+    tasks_per_node=1,
+    nodes=1,
+    cpus_per_task=10
+)
 
+experiment_jobs = []
+with executor.batch():
+    for train_ratio in tqdm(np.linspace(.1, 1., 5)):
+        train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
+        experiment_size = test_size + train_size
+        for experiment in tqdm(range(experiments)):
+            job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
+            experiment_jobs.append(job)
 
-# %% [markdown]
-## Post-processing
+# %%
+experiment_results = []
+for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
+    res = await aws
+    experiment_results.append(res)
 
 
 # %%
+_, _, models, losses, predictions = zip(*experiment_results)
+
+# %%
+prediction_metrics = predictions[0]
+for prediction in predictions[1:]:
+    prediction_metrics |= prediction
+prediction_metrics = [
+    k + (np.abs(v[0]-v[1]).mean(),)
+    for k, v in prediction_metrics.items()
+]
+prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
+prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+ax = sns.violinplot(data=prediction_metrics, x="train size", y="MAE", hue="dataset", hue_order=['train', 'test'], split=True, gap=20)
+for patch in ax.collections:
+    patch.set_alpha(0.4)
+
+sns.pointplot(x='train size', y='MAE', hue='dataset', data=prediction_metrics.groupby(['train size', 'dataset'], as_index=False)['MAE'].median(), ax=ax, hue_order=['train', 'test'], markers="_")
+ax.set_yticks(np.arange(0, 100, 5))
+plt.axhline(0, c='k')
+plt.suptitle("Training set ratio 20%, 20 experiments per size")
+plt.grid()
+plt.savefig("learning_curve.pdf")
+# %%
+
+# %%
+
 # %% [markdown]
 # ## Evaluation
-model.eval()
-_, axs = plt.subplots(nrows=2, ncols=2, figsize=(25, 25))
-with torch.no_grad():
-    for i, (label, dataset) in enumerate([('train', train_dataset), ('test', test_dataset)]):
-        X, y = zip(*dataset)
-        X = torch.stack(X).to(device=device)
-        y = torch.stack(y).to(device=device)
-        x_emb, y_emb = model(X, y)
-        axs[i, 0].scatter(*x_emb.cpu().T, label='fconn')
-        axs[i, 0].scatter(*y_emb.cpu().T, label='age')
-        axs[i, 0].axis('equal')
-        axs[i, 0].set_title(f'{label}: embedding')
-        axs[i, 0].legend()
 
-        res = pd.DataFrame()
-        y_pred = model.decode_targets(x_emb)
-        res = pd.DataFrame(
-            torch.stack([y, y_pred]).squeeze().cpu().T,
-            columns=['age', 'prediction']
-        )
-        res = res.eval('err_ratio = (age - prediction) / age')
-        corr, _ = pearsonr(res['age'], res['prediction'])
-        mae = np.abs(res['age'] - res['prediction']).mean()
-        corr_err, _ = pearsonr(res['age'], res['err_ratio'])
-        corr_text = f"prediction $\\rho$: {corr:.2f} MAE: {mae:.2f} error $\\rho$: {corr_err:.2f}"
-        sns.regplot(x="age", y="err_ratio", data=res, scatter_kws={"alpha": 0.5}, ax=axs[i, 1])
-        axs[i, 1].annotate(
-            corr_text,
-            xy=(0.05, 0.95),
-            xycoords="axes fraction",
-            fontsize=12,
-            bbox=dict(boxstyle="round", alpha=0.5, color="w"),
-        )
-        axs[i, 1].set_title(f'{label}: prediction')
+if False:
+    model.eval()
+    _, axs = plt.subplots(nrows=2, ncols=2, figsize=(25, 25))
+    with torch.no_grad():
+        for i, (label, dataset) in enumerate([('train', train_dataset), ('test', test_dataset)]):
+            X, y = zip(*dataset)
+            X = torch.stack(X).to(device=device)
+            y = torch.stack(y).to(device=device)
+            x_emb, y_emb = model(X, y)
+            axs[i, 0].scatter(*x_emb.cpu().T, label='fconn')
+            axs[i, 0].scatter(*y_emb.cpu().T, label='age')
+            axs[i, 0].axis('equal')
+            axs[i, 0].set_title(f'{label}: embedding')
+            axs[i, 0].legend()
+
+            res = pd.DataFrame()
+            y_pred = model.decode_targets(x_emb)
+            res = pd.DataFrame(
+                torch.stack([y, y_pred]).squeeze().cpu().T,
+                columns=['age', 'prediction']
+            )
+            res = res.eval('err_ratio = (age - prediction) / age')
+            corr, _ = pearsonr(res['age'], res['prediction'])
+            mae = np.abs(res['age'] - res['prediction']).mean()
+            corr_err, _ = pearsonr(res['age'], res['err_ratio'])
+            corr_text = f"prediction $\\rho$: {corr:.2f} MAE: {mae:.2f} error $\\rho$: {corr_err:.2f}"
+            sns.regplot(x="age", y="err_ratio", data=res, scatter_kws={"alpha": 0.5}, ax=axs[i, 1])
+            axs[i, 1].annotate(
+                corr_text,
+                xy=(0.05, 0.95),
+                xycoords="axes fraction",
+                fontsize=12,
+                bbox=dict(boxstyle="round", alpha=0.5, color="w"),
+            )
+            axs[i, 1].set_title(f'{label}: prediction')
 
 
 # %%
