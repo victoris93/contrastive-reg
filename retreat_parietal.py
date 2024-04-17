@@ -22,6 +22,7 @@ from tqdm.auto import tqdm
 
 # %%
 torch.cuda.empty_cache()
+multi_gpu = False
 
 # %%
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
@@ -461,32 +462,40 @@ test_size = int(test_ratio * len(dataset))
 indices = np.arange(len(dataset))
 experiments = 20
 
-# %%
-log_folder = "log_training/%j"
-executor = submitit.AutoExecutor(folder=log_folder)
-executor.update_parameters(
-    timeout_min=20,
-    slurm_partition="parietal,gpu-best",
-    gpus_per_node=1,
-    tasks_per_node=1,
-    nodes=1,
-    cpus_per_task=10
-)
+# %% # Training
+if multi_gpu:
+    log_folder = "log_training/%j"
+    executor = submitit.AutoExecutor(folder=log_folder)
+    executor.update_parameters(
+        timeout_min=20,
+        slurm_partition="parietal,gpu-best",
+        gpus_per_node=1,
+        tasks_per_node=1,
+        nodes=1,
+        cpus_per_task=10
+    )
 
-experiment_jobs = []
-with executor.batch():
-    for train_ratio in tqdm(np.linspace(.1, 1., 5)):
+    experiment_jobs = []
+    with executor.batch():
+        for train_ratio in tqdm(np.linspace(.1, 1., 5)):
+            train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
+            experiment_size = test_size + train_size
+            for experiment in tqdm(range(experiments)):
+                job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
+                experiment_jobs.append(job)
+
+    experiment_results = []
+    for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
+        res = await aws
+        experiment_results.append(res)
+else:
+    experiment_results = []
+    for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
         train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
         experiment_size = test_size + train_size
-        for experiment in tqdm(range(experiments)):
-            job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
-            experiment_jobs.append(job)
-
-# %%
-experiment_results = []
-for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
-    res = await aws
-    experiment_results.append(res)
+        for experiment in tqdm(range(experiments), desc="Experiment"):
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
+            experiment_results.append(job)
 
 
 # %%
