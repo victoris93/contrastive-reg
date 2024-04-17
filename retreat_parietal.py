@@ -442,12 +442,14 @@ for train_ratio in tqdm(np.linspace(.1, 1., 5)):
         test_dataset = Subset(dataset, test_indices)
         loss_terms, model = train(train_dataset, test_dataset)
         losses.append(loss_terms.eval("train_ratio = @train_ratio"))
-        for label, d in (('train', train_dataset), ('test', test_dataset)):
-            X, y = zip(*d)
-            X = torch.stack(X).to(device)
-            y = torch.stack(y).to(device)
-            y_pred = model.decode_target(model.transform_feat(X))
-            predictions[(train_ratio, experiment, label)] = (y, predictions)
+        model.eval()
+        with torch.no_grad():
+            for label, d in (('train', train_dataset), ('test', test_dataset)):
+                X, y = zip(*d)
+                X = torch.stack(X).to(device)
+                y = torch.stack(y).to(device)
+                y_pred = model.decode_target(model.transform_feat(X))
+                predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), predictions.cpu().numpy(), d.indices)
 
 
 
