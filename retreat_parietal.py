@@ -449,10 +449,14 @@ for train_ratio in tqdm(np.linspace(.1, 1., 5)):
                 X = torch.stack(X).to(device)
                 y = torch.stack(y).to(device)
                 y_pred = model.decode_target(model.transform_feat(X))
-                predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), predictions.cpu().numpy(), d.indices)
+                predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
 
 
+# %% [markdown]
+## Post-processing
 
+
+# %%
 # %% [markdown]
 # ## Evaluation
 model.eval()
