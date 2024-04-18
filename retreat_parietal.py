@@ -11,11 +11,15 @@
 # ---
 
 # %%
+import matplotlib
+matplotlib.use('Agg')
+
 import math
 import asyncio
 from pathlib import Path
 import gc
 from collections import defaultdict
+import pickle
 
 import submitit
 import matplotlib.pyplot as plt
@@ -30,7 +34,7 @@ from sklearn.model_selection import (
     train_test_split
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 # %%
 torch.cuda.empty_cache()
@@ -325,15 +329,19 @@ def cauchy(x, krnl_sigma):
 
 
 # %%
-dataset = MatData(
-    data_path / "vectorized_matrices.npy",
-    data_path / "participants.csv",
-    "age",
-    threshold=.95
-)
+if not multi_gpu:
+    dataset = MatData(
+        data_path / "vectorized_matrices.npy",
+        data_path / "participants.csv",
+        "age",
+        threshold=.95
+    )
 
 # %%
-def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
+def train(train_dataset, test_dataset, model=None, kernel=cauchy, num_epochs=100, batch_size=32, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     input_dim_feat = 499500
     # the rest is arbitrary
     hidden_dim_feat = 1000
@@ -427,41 +435,65 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
 
 
 # %%
-def run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment, threshold=0,random_state=None, device=device, dataset=None):
-    if not isinstance(random_state, np.random.RandomState):
-        random_state = np.random.RandomState(random_state)
 
-    if dataset is None:
-        dataset = MatData(
-            data_path / "vectorized_matrices.npy", data_path / "participants.csv",
-            "age",
-            threshold=threshold
-        )
+class Experiment(submitit.helpers.Checkpointable):
+    def __init__(self):
+        self.results = None
 
-    predictions = {}
-    losses = []
-    experiment_indices = random_state.choice(indices, experiment_size, replace=False)
-    train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
-    train_dataset = Subset(dataset, train_indices)
-    test_dataset = Subset(dataset, test_indices)
-    loss_terms, model = train(train_dataset, test_dataset)
-    losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
-    model.eval()
-    with torch.no_grad():
-        for label, d in (('train', train_dataset), ('test', test_dataset)):
-            X, y = zip(*d)
-            X = torch.stack(X).to(device)
-            y = torch.stack(y).to(device)
-            y_pred = model.decode_target(model.transform_feat(X))
-            predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
-    return train_indices, test_indices, model.cpu(), losses, predictions
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, threshold=0, random_state=None, device=None, dataset=None, path: Path = None):
+        if self.results is None:
+            if device is None:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                print(f"Device {device}")
+            if not isinstance(random_state, np.random.RandomState):
+                random_state = np.random.RandomState(random_state)
+
+            if dataset is None:
+                dataset = MatData(
+                    data_path / "vectorized_matrices.npy", data_path / "participants.csv",
+                    "age",
+                    threshold=threshold
+                )
+
+            predictions = {}
+            losses = []
+            experiment_indices = random_state.choice(indices, experiment_size, replace=False)
+            train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
+            train_dataset = Subset(dataset, train_indices)
+            test_dataset = Subset(dataset, test_indices)
+            loss_terms, model = train(train_dataset, test_dataset, device=device)
+            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
+            model.eval()
+            with torch.no_grad():
+                for label, d in (('train', train_dataset), ('test', test_dataset)):
+                    X, y = zip(*d)
+                    X = torch.stack(X).to(device)
+                    y = torch.stack(y).to(device)
+                    y_pred = model.decode_target(model.transform_feat(X))
+                    predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
+
+            self.results = (train_indices, test_indices, model.cpu(), losses, predictions)
+
+        if path:
+            self.save(path)
+        
+        return self.results
+
+    def checkpoint(self, *args, **kwargs):
+        print("Checkpointing", flush=True)
+        return super().checkpoint(*args, **kwargs)
+
+    def save(self, path: Path):
+        with open(path, "wb") as o:
+            pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
+
 
 # %%
 random_state = np.random.RandomState(seed=42)
 
 test_ratio = .2
-test_size = int(test_ratio * len(dataset))
-indices = np.arange(len(dataset))
+test_size = int(test_ratio * len(participants))
+indices = np.arange(len(participants))
 experiments = 20
 
 # %% ## Training
@@ -474,31 +506,38 @@ if multi_gpu:
         gpus_per_node=1,
         tasks_per_node=1,
         nodes=1,
-        cpus_per_task=10
+        cpus_per_task=10,
+        slurm_mem="10G",
+        slurm_exclude="margpu005",
+        slurm_additional_parameters={"requeue": True}
     )
 
     experiment_jobs = []
     with executor.batch():
         for train_ratio in tqdm(np.linspace(.1, 1., 5)):
-            train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
+            train_size = int(len(participants) * (1 - test_ratio) * train_ratio)
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
-                job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=device)
+                run_experiment = Experiment()
+                job = executor.submit(run_experiment, train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=None)
                 experiment_jobs.append(job)
 
-    experiment_results = []
-    for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
-        res = await aws
-        experiment_results.append(res)
+    async def get_result(experiment_jobs):
+        experiment_results = []
+        for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
+            res = await aws
+            experiment_results.append(res)
+        return experiment_results
+    experiment_results = asyncio.run(get_result(experiment_jobs))
 else:
     experiment_results = []
     for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
         train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
+            run_experiment = Experiment()
             job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=device)
             experiment_results.append(job)
-
 
 # %%
 _, _, models, losses, predictions = zip(*experiment_results)
