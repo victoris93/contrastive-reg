@@ -34,11 +34,11 @@ from tqdm.auto import tqdm
 
 # %%
 torch.cuda.empty_cache()
-multi_gpu = True
+multi_gpu = False
 
 # %%
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
-data_path = Path("/data/parietal/store/work/dwassermann/data/data_mat_age_demian")
+data_path = Path("../data")
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -428,6 +428,8 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
 
 # %%
 def run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment, threshold=0,random_state=None, device=device, dataset=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if not isinstance(random_state, np.random.RandomState):
         random_state = np.random.RandomState(random_state)
 
@@ -470,11 +472,14 @@ if multi_gpu:
     executor = submitit.AutoExecutor(folder=log_folder)
     executor.update_parameters(
         timeout_min=20,
-        slurm_partition="parietal,gpu-best",
+        slurm_partition="gpu_p5",
+        account="ftj@a100",
         gpus_per_node=1,
         tasks_per_node=1,
         nodes=1,
-        cpus_per_task=10
+        cpus_per_task=8,
+        qos="qos_gpu-t3",
+        constraint="A100"
     )
 
     experiment_jobs = []
