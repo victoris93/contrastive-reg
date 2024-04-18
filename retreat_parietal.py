@@ -1,3 +1,15 @@
+# ---
+# jupyter:
+#   jupytext:
+#     cell_metadata_filter: title,-all
+#     custom_cell_magics: kql
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.11.2
+# ---
+
 # %%
 import math
 import asyncio
@@ -15,14 +27,14 @@ import torch.nn as nn
 import torch.optim as optim
 from scipy.stats import pearsonr
 from sklearn.model_selection import (
-    train_test_split, LearningCurveDisplay
+    train_test_split
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 
 # %%
 torch.cuda.empty_cache()
-multi_gpu = False
+multi_gpu = True
 
 # %%
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
@@ -111,11 +123,19 @@ class MLP(nn.Module):
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name, device=device):
-        self.matrices = np.load(path_feat)
-        self.target = np.expand_dims(
-            pd.read_csv(path_targets)[target_name].values, axis=1
+    def __init__(self, path_feat, path_targets, target_name, threshold=0, device=device):
+        self.matrices = torch.from_numpy(np.load(path_feat)).float()
+        self.target = torch.tensor(
+            np.expand_dims(
+                pd.read_csv(path_targets)[target_name].values, axis=1
+            ),
+            dtype=torch.float32
         )
+        self.threshold = threshold
+        if threshold > 0:
+            thrs = torch.quantile(self.matrices.abs(), q=threshold, dim=1)
+            self.matrices = self.matrices * (self.matrices.abs() >= thrs[:, None])
+
 
     def __len__(self):
         return len(self.matrices)
@@ -123,8 +143,6 @@ class MatData(Dataset):
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
         target = self.target[idx]
-        matrix = torch.from_numpy(matrix).float()
-        target = torch.tensor(target, dtype=torch.float32)
         return matrix, target
 
 
@@ -310,20 +328,9 @@ def cauchy(x, krnl_sigma):
 dataset = MatData(
     data_path / "vectorized_matrices.npy",
     data_path / "participants.csv",
-    "age"
+    "age",
+    threshold=.95
 )
-
-# %%
-if False:
-    thr = 0.99
-
-    X, y = list(zip(*dataset))
-    X = torch.stack(X)
-    y = torch.stack(y)
-    thrs = torch.quantile(X, q=thr, dim=1)
-    X_thr = X * (X >= thrs[:, None])
-    transformed_dataset = TensorDataset(X_thr, y)
-    dataset = TensorDataset(X, y)
 
 # %%
 def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
@@ -419,22 +426,17 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
     return loss_terms, model
 
 
-# %% [markdown]
-# ## Learning curve
-
-def run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment ,random_state=None, device=device, dataset=None):
+# %%
+def run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment, threshold=0,random_state=None, device=device, dataset=None):
     if not isinstance(random_state, np.random.RandomState):
         random_state = np.random.RandomState(random_state)
 
     if dataset is None:
         dataset = MatData(
             data_path / "vectorized_matrices.npy", data_path / "participants.csv",
-            "age"
+            "age",
+            threshold=threshold
         )
-        X, y = list(zip(*dataset))
-        X = torch.stack(X)
-        y = torch.stack(y)
-        dataset = TensorDataset(X, y)
 
     predictions = {}
     losses = []
@@ -462,7 +464,7 @@ test_size = int(test_ratio * len(dataset))
 indices = np.arange(len(dataset))
 experiments = 20
 
-# %% # Training
+# %% ## Training
 if multi_gpu:
     log_folder = "log_training/%j"
     executor = submitit.AutoExecutor(folder=log_folder)
@@ -481,7 +483,7 @@ if multi_gpu:
             train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
-                job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
+                job = executor.submit(run_experiment,train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=device)
                 experiment_jobs.append(job)
 
     experiment_results = []
@@ -494,7 +496,7 @@ else:
         train_size = int(len(dataset) * (1 - test_ratio) * train_ratio)
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, random_state)
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=device)
             experiment_results.append(job)
 
 
@@ -518,51 +520,7 @@ for patch in ax.collections:
 sns.pointplot(x='train size', y='MAE', hue='dataset', data=prediction_metrics.groupby(['train size', 'dataset'], as_index=False)['MAE'].median(), ax=ax, hue_order=['train', 'test'], markers="_")
 ax.set_yticks(np.arange(0, 100, 5))
 plt.axhline(0, c='k')
-plt.suptitle("Training set ratio 20%, 20 experiments per size")
+plt.suptitle("Training set ratio 20%, 20 experiments per size, threhsold 95%")
 plt.grid()
-plt.savefig("learning_curve.pdf")
-# %%
-
-# %%
-
-# %% [markdown]
-# ## Evaluation
-
-if False:
-    model.eval()
-    _, axs = plt.subplots(nrows=2, ncols=2, figsize=(25, 25))
-    with torch.no_grad():
-        for i, (label, dataset) in enumerate([('train', train_dataset), ('test', test_dataset)]):
-            X, y = zip(*dataset)
-            X = torch.stack(X).to(device=device)
-            y = torch.stack(y).to(device=device)
-            x_emb, y_emb = model(X, y)
-            axs[i, 0].scatter(*x_emb.cpu().T, label='fconn')
-            axs[i, 0].scatter(*y_emb.cpu().T, label='age')
-            axs[i, 0].axis('equal')
-            axs[i, 0].set_title(f'{label}: embedding')
-            axs[i, 0].legend()
-
-            res = pd.DataFrame()
-            y_pred = model.decode_targets(x_emb)
-            res = pd.DataFrame(
-                torch.stack([y, y_pred]).squeeze().cpu().T,
-                columns=['age', 'prediction']
-            )
-            res = res.eval('err_ratio = (age - prediction) / age')
-            corr, _ = pearsonr(res['age'], res['prediction'])
-            mae = np.abs(res['age'] - res['prediction']).mean()
-            corr_err, _ = pearsonr(res['age'], res['err_ratio'])
-            corr_text = f"prediction $\\rho$: {corr:.2f} MAE: {mae:.2f} error $\\rho$: {corr_err:.2f}"
-            sns.regplot(x="age", y="err_ratio", data=res, scatter_kws={"alpha": 0.5}, ax=axs[i, 1])
-            axs[i, 1].annotate(
-                corr_text,
-                xy=(0.05, 0.95),
-                xycoords="axes fraction",
-                fontsize=12,
-                bbox=dict(boxstyle="round", alpha=0.5, color="w"),
-            )
-            axs[i, 1].set_title(f'{label}: prediction')
-
-
+plt.savefig("learning_curve_threshold_95.pdf")
 # %%
