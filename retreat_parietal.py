@@ -37,6 +37,9 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm import tqdm
 
 # %%
+THRESHOLD = .99
+
+# %%
 torch.cuda.empty_cache()
 multi_gpu = True
 
@@ -127,8 +130,9 @@ class MLP(nn.Module):
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name, threshold=0, device=device):
-        self.matrices = torch.from_numpy(np.load(path_feat)).float()
+    def __init__(self, path_feat, path_targets, target_name, threshold=0):
+        # self.matrices = np.load(path_feat, mmap_mode="r")
+        self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
         self.target = torch.tensor(
             np.expand_dims(
                 pd.read_csv(path_targets)[target_name].values, axis=1
@@ -136,10 +140,16 @@ class MatData(Dataset):
             dtype=torch.float32
         )
         self.threshold = threshold
-        if threshold > 0:
-            thrs = torch.quantile(self.matrices.abs(), q=threshold, dim=1)
-            self.matrices = self.matrices * (self.matrices.abs() >= thrs[:, None])
+        if self.threshold > 0:
+            self.thrs = np.quantile(
+                np.abs(self.matrices),
+                q=self.threshold,
+                axis=1
+            )
+            self.matrices = self.matrices * (np.abs(self.matrices) * self.thrs[:, None])
 
+        self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        gc.collect()
 
     def __len__(self):
         return len(self.matrices)
@@ -334,7 +344,7 @@ if not multi_gpu:
         data_path / "vectorized_matrices.npy",
         data_path / "participants.csv",
         "age",
-        threshold=.95
+        threshold=THRESHOLD
     )
 
 # %%
@@ -352,8 +362,8 @@ def train(train_dataset, test_dataset, model=None, kernel=cauchy, num_epochs=100
     dropout_rate = 0
     weight_decay = 0
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=10)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=10)
 
     if model is None:
         model = MLP(
@@ -443,17 +453,20 @@ class Experiment(submitit.helpers.Checkpointable):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                print(f"Device {device}")
+                print(f"Device {device}, ratio {train_ratio}", flush=True)
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
 
             if dataset is None:
+                print("Loading data", flush=True)
                 dataset = MatData(
-                    data_path / "vectorized_matrices.npy", data_path / "participants.csv",
+                    data_path / "vectorized_matrices.npy",
+                    data_path / "participants.csv",
                     "age",
                     threshold=threshold
                 )
 
+            print("Data loaded", flush=True)
             predictions = {}
             losses = []
             experiment_indices = random_state.choice(indices, experiment_size, replace=False)
@@ -471,7 +484,7 @@ class Experiment(submitit.helpers.Checkpointable):
                     y_pred = model.decode_target(model.transform_feat(X))
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d.indices)
 
-            self.results = (train_indices, test_indices, model.cpu(), losses, predictions)
+            self.results = (losses, predictions)
 
         if path:
             self.save(path)
@@ -497,20 +510,20 @@ experiments = 20
 
 # %% ## Training
 if multi_gpu:
-    log_folder = "log_training/%j"
-    executor = submitit.AutoExecutor(folder=log_folder)
+    log_folder = Path("log_folder")
+    executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
-        timeout_min=20,
-        #slurm_partition="gpu_p2s",
-        account="hjt@v100",
+        timeout_min=40,
+        #slurm_partition="gpu_p5",
+        slurm_account="hjt@v100",
         gpus_per_node=1,
         tasks_per_node=1,
         nodes=1,
-        cpus_per_task=10,
-        #qos="qos_gpu-t3",
-        #slurm_constraint="v100-32g",
-        # slurm_mem="10G",
-        slurm_additional_parameters={"requeue": True}
+        cpus_per_task=30,
+        #slurm_qos="qos_gpu-t3",
+        slurm_constraint="v100-32g",
+        #slurm_mem="10G",
+        #slurm_additional_parameters={"requeue": True}
     )
     # srun -n 1  --verbose -A hjt@v100 -c 10 -C v100-32g   --gres=gpu:1 --time 5  python
     experiment_jobs = []
@@ -522,7 +535,7 @@ if multi_gpu:
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
                 run_experiment = Experiment()
-                job = executor.submit(run_experiment, train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=None)
+                job = executor.submit(run_experiment, train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=THRESHOLD, random_state=random_state, device=None)
                 experiment_jobs.append(job)
 
     async def get_result(experiment_jobs):
@@ -539,11 +552,11 @@ else:
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
             run_experiment = Experiment()
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=.95, random_state=random_state, device=None)
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, threshold=THRESHOLD, random_state=random_state, device=None)
             experiment_results.append(job)
 
 # %%
-_, _, models, losses, predictions = zip(*experiment_results)
+losses, predictions = zip(*experiment_results)
 
 # %%
 prediction_metrics = predictions[0]
@@ -554,7 +567,7 @@ prediction_metrics = [
     for k, v in prediction_metrics.items()
 ]
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
-prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(participants) * (1 - test_ratio)).astype(int)
 ax = sns.violinplot(data=prediction_metrics, x="train size", y="MAE", hue="dataset", hue_order=['train', 'test'], split=True, gap=20)
 for patch in ax.collections:
     patch.set_alpha(0.4)
@@ -562,7 +575,7 @@ for patch in ax.collections:
 sns.pointplot(x='train size', y='MAE', hue='dataset', data=prediction_metrics.groupby(['train size', 'dataset'], as_index=False)['MAE'].median(), ax=ax, hue_order=['train', 'test'], markers="_")
 ax.set_yticks(np.arange(0, 100, 5))
 plt.axhline(0, c='k')
-plt.suptitle("Training set ratio 20%, 20 experiments per size, threhsold 95%")
+plt.suptitle(f"Training set ratio 20%, 20 experiments per size, threhsold {int(THRESHOLD * 100)}%")
 plt.grid()
-plt.savefig("learning_curve_threshold_95.pdf")
+plt.savefig(f"learning_curve_threshold_{int(THRESHOLD * 100)}.pdf")
 # %%
