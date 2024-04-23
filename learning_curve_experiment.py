@@ -2,6 +2,7 @@ import math
 import asyncio
 import submitit
 import pickle
+import sys
 from pathlib import Path
 import gc
 from collections import defaultdict
@@ -19,6 +20,7 @@ from sklearn.model_selection import (
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
+from augmentations import augs
 
 
 torch.cuda.empty_cache()
@@ -28,10 +30,13 @@ multi_gpu = True
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
 # -
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device
+# %%
 
-participants = pd.read_csv("participants.csv")
+# %%
+THRESHOLD = float(sys.argv[1])
+AUGMENTATION = None
+# %%
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class MLP(nn.Module):
     def __init__(
@@ -101,86 +106,83 @@ class MLP(nn.Module):
        return x_embedding, y_embedding
 
 
+# class MatData(Dataset):
+#     def __init__(self, path_feat, path_target, target_name, indices, transform = None, transform_params = None, threshold = 0, random_state=42):
+
+#         # Load the entire dataset
+#         features = np.load(path_feat, mmap_mode="r").astype(np.float32)[indices]
+#         targets = pd.read_csv(path_target)[target_name].values[indices]
+#         targets = np.expand_dims(targets, axis = 1)
+
+#         self.n_sub = len(features)
+#         self.n_views = 1
+#         self.transform = transform
+#         self.targets = targets
+#         self.transform_params = transform_params if transform_params is not None else {}
+        
+#         vectorized_feat = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in features])
+        
+#         if threshold > 0:
+#             thrs = np.quantile(np.abs(vectorized_feat), q=threshold, axis=1, keepdims=True)
+#             vectorized_feat = vectorized_feat * (np.abs(vectorized_feat) >= thrs)
+        
+#         self.n_features = vectorized_feat.shape[-1]
+        
+#         if transform is not None:
+#             # apply augmentation only in training mode!
+#             if transform != "copy":
+#                 augmented_features = np.array([self.transform(sample, **self.transform_params) for sample in features])
+#                 augmented_features = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in augmented_features])
+#                 self.n_views = self.n_views + augmented_features.shape[1]
+#                 self.features = np.zeros((self.n_sub, self.n_views, self.n_features))
+#                 for sub in range(self.n_sub):
+#                     self.features[sub, 0, :] = vectorized_feat[sub]
+#                     self.features[sub, 1:, :] = augmented_features[sub]
+#             else:
+#                 self.features = np.repeat(np.expand_dims(vectorized_feat, axis = 1), 2, axis=1)
+#         else:
+#             self.features = np.expand_dims(vectorized_feat, axis = 1)
+
+#         self.features = torch.from_numpy(self.features).to(torch.float32)
+#         self.targets = torch.tensor(self.targets, dtype=torch.float32)
+#         gc.collect()
+
+#     def __len__(self):
+#         return len(self.features)
+
+#     def __getitem__(self, idx):
+#         features = self.features[idx]
+#         targets = self.targets[idx]
+#         return features, targets
+
 class MatData(Dataset):
-    def __init__(self, path_feat, path_target, target_name, indices, transform = None, transform_params = None, threshold = 0, random_state=42):
-        """
-        Initializes the dataset with the capability to handle training and testing splits, 
-        including multiple views for augmented data.
-        
-        Args:
-            path_feat (str): Path to the features file.
-            path_target (str): Path to the target file.
-            transform (callable): A transformation function to apply for augmentation.
-            train (bool): Whether the dataset is used for training. False will load the test set.
-            test_size (float): Proportion of the dataset to include in the test split.
-            random_state (int): Random state for reproducible train-test splits.
-        """
-        # Load the entire dataset
-        features = np.load(path_feat, mmap_mode="r").astype(np.float32)[indices]
-        targets = pd.read_csv(path_target)[target_name].values[indices]
-        targets = np.expand_dims(targets, axis = 1)
-
-        self.n_sub = len(features)
-        self.n_views = 1
-        self.transform = transform
-        self.targets = targets
-        self.transform_params = transform_params if transform_params is not None else {}
-        
-        vectorized_feat = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in features])
-        
+    def __init__(self, path_feat, path_targets, target_name, threshold=0):
+        # self.matrices = np.load(path_feat, mmap_mode="r")
+        self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
+        self.target = torch.tensor(
+            np.expand_dims(
+                pd.read_csv(path_targets)[target_name].values, axis=1
+            ),
+            dtype=torch.float32
+        )
         if threshold > 0:
-            thrs = np.quantile(np.abs(vectorized_feat), q=threshold, axis=1, keepdims=True)
-            vectorized_feat = vectorized_feat * (np.abs(vectorized_feat) >= thrs)
-        
-        self.n_features = vectorized_feat.shape[-1]
-        
-        if transform is not None:
-            # apply augmentation only in training mode!
-            if transform != "copy":
-                augmented_features = np.array([self.transform(sample, **self.transform_params) for sample in features])
-                augmented_features = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in augmented_features])
-                self.n_views = self.n_views + augmented_features.shape[1]
-                self.features = np.zeros((self.n_sub, self.n_views, self.n_features))
-                for sub in range(self.n_sub):
-                    self.features[sub, 0, :] = vectorized_feat[sub]
-                    self.features[sub, 1:, :] = augmented_features[sub]
-            else:
-                self.features = np.repeat(np.expand_dims(vectorized_feat, axis = 1), 2, axis=1)
-        else:
-            self.features = np.expand_dims(vectorized_feat, axis = 1)
-
-        self.features = torch.from_numpy(self.features).to(torch.float32)
-        self.targets = torch.tensor(self.targets, dtype=torch.float32)
+            self.matrices = self.threshold(self.matrices, threshold)
+        self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
 
+    def threshold(self, matrices, threshold):
+        perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
+        mask = np.abs(matrices) >= perc
+        thresh_mat = matrices * mask
+        return thresh_mat
+
     def __len__(self):
-        return len(self.features)
-
+        return len(self.matrices)
     def __getitem__(self, idx):
-        features = self.features[idx]
-        targets = self.targets[idx]
-        return features, targets
-
-
-def random_threshold_augmentation(features, threshold):
-    # Calculate the 95th percentile threshold
-    threshold = np.quantile(features, threshold)
+        matrix = self.matrices[idx]
+        target = self.target[idx]
+        return matrix, target
     
-    # Apply thresholding: Set values below the threshold to zero
-    features_thresholded = np.where(np.abs(features) > threshold, 0, features)
-    
-    # Generate random values between 0 and the threshold wherever there are zeros
-    random_values = np.random.uniform(0, threshold, features.shape)
-    augmented_features = np.where(features_thresholded == 0, random_values, features_thresholded)
-
-    # Apply L2 normalization
-    norm = np.linalg.norm(augmented_features)
-    normalized_features = augmented_features / norm if norm != 0 else augmented_features
-    
-    
-    return np.expand_dims(normalized_features, axis = 0)
-
-
 # loss from: https://github.com/EIDOSLAB/contrastive-brain-age-prediction/blob/master/src/losses.py
 # modified to accept input shape [bsz, n_feats]. In the age paper: [bsz, n_views, n_feats].
 class KernelizedSupCon(nn.Module):
@@ -482,7 +484,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, threshold=0, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -504,20 +506,51 @@ class Experiment(submitit.helpers.Checkpointable):
             losses = []
             experiment_indices = random_state.choice(indices, experiment_size, replace=False)
             train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
-            train_dataset = MatData("matrices.npy", "participants.csv", "age", transform = None, transform_params = None, threshold = 0, indices = train_indices, random_state=random_state)
-            test_dataset = MatData("matrices.npy", "participants.csv", "age", indices = test_indices, random_state=random_state)
+            train_dataset = Subset(dataset, train_indices)
+            test_dataset = Subset(dataset, test_indices)
+            ### Augmentation
+            n_views = 1
+            train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
+            train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+
+            test_features= train_dataset.dataset.matrices[train_dataset.indices].numpy()
+            test_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+
+            if AUGMENTATION is not None:
+                transform = augs[AUGMENTATION]
+                aug_features = np.array([transform(sample) for sample in train_features])
+
+                train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+                aug_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+
+                n_views = n_views + aug_features.shape[1]
+                n_features = train_features.shape[-1]
+                n_samples = len(train_dataset)
+
+                new_train_features = np.zeros((n_samples, n_views, n_features))
+                new_train_features[:, 0, :] = train_features
+                new_train_features[:, 1:, :] = aug_features
+            else:
+                train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+                train_features = np.expand_dims(train_features, axis = 1)
+            
+            train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
+            test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
+            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
+
             loss_terms, model = train(train_dataset, test_dataset, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             model.eval()
             with torch.no_grad():
-                train_dataset = MatData("matrices.npy", "participants.csv", "age", indices = train_indices, random_state=random_state)
+                train_dataset = Subset(dataset, train_indices)
+                train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
+                train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+                train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
+                train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     X, y = zip(*d)
-                    X = torch.stack(X)
-                    print(label, X.shape)
-                    X = X.squeeze(1).to(device)
+                    X = torch.stack(X).to(device)
                     y = torch.stack(y).to(device)
-                    print(label, X.shape)
                     y_pred = model.decode_target(model.transform_feat(X))
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
 
@@ -537,7 +570,8 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 random_state = np.random.RandomState(seed=42)
-n_sub = len(participants)
+dataset = MatData("matrices.npy", "participants.csv", "age", threshold=THRESHOLD)
+n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
@@ -565,11 +599,11 @@ if multi_gpu:
     # module_load = submitit.helpers.CommandFunction("module load pytorch-gpu/py3/2.0.1".split())
     with executor.batch():
         for train_ratio in tqdm(np.linspace(.1, 1., 5)):
-            train_size = int(len(participants) * (1 - test_ratio) * train_ratio)
+            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
                 run_experiment = Experiment()
-                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, random_state=random_state, device=None)
+                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, random_state=random_state, device=None)
                 experiment_jobs.append(job)
 
     async def get_result(experiment_jobs):
@@ -586,12 +620,11 @@ else:
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
             run_experiment = Experiment()
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, random_state=random_state, device=None)
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, random_state=random_state, device=None)
             experiment_results.append(job)
 
 # %%
 losses, predictions = zip(*experiment_results)
-
 
 # %%
 prediction_metrics = predictions[0]
@@ -602,6 +635,6 @@ prediction_metrics = [
     for k, v in prediction_metrics.items()
 ]
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
-prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(participants) * (1 - test_ratio)).astype(int)
+prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 
-prediction_metrics.to_csv("results/prediction_metrics_noaug.csv", index=False)
+prediction_metrics.to_csv(f"results/prediction_metrics_thresh{THRESHOLD}.csv", index=False)
