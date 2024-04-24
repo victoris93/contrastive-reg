@@ -30,7 +30,7 @@ def flipping_threshold_augmentation(features, hemisphere_size=None):
         if features_thresholded[opposite_region, selected_idx[1]] == 0:
             selected_pairs.append([region1, opposite_region])
         if selected_pairs:
-            flipped_matrices = flip_edge_between_regions(features, selected_pairs)
+            flipped_matrices = flip_edge_between_regions(features, selected_pairs, vectorize_mat=False)
             return flipped_matrices
     return features
 
