@@ -513,8 +513,8 @@ class Experiment(submitit.helpers.Checkpointable):
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
 
-            test_features= train_dataset.dataset.matrices[train_dataset.indices].numpy()
-            test_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+            test_features= train_dataset.dataset.matrices[test_dataset.indices].numpy()
+            test_targets = train_dataset.dataset.target[test_dataset.indices].numpy()
 
             if AUGMENTATION is not None:
                 transform = augs[AUGMENTATION]
@@ -637,4 +637,4 @@ prediction_metrics = [
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 
-prediction_metrics.to_csv(f"results/prediction_metrics_thresh{THRESHOLD}.csv", index=False)
+prediction_metrics.to_csv(f"results/prediction_metrics_thresh{int(THRESHOLD * 100)}.csv", index=False)
