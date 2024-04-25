@@ -1,0 +1,281 @@
+Augmentation,Parameters,Anchor Closer to Aug Than Other Augs,Anchor Closer to Aug Than Other Originals,Aug Closer to Anchor Than Other Augs,Aug Closer to Anchor Than Other Originals
+random_threshold,"{'threshold': 10, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 1}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 1}",100.0,30.000001907348633,100.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 1}",70.0,0.0,100.0,70.0
+random_threshold,"{'threshold': 96, 'bound': 1}",60.000003814697266,0.0,100.0,40.0
+random_threshold,"{'threshold': 97, 'bound': 1}",30.000001907348633,0.0,100.0,30.000001907348633
+random_threshold,"{'threshold': 98, 'bound': 1}",20.0,0.0,100.0,20.0
+random_threshold,"{'threshold': 99, 'bound': 1}",20.0,0.0,100.0,10.0
+random_threshold,"{'threshold': 10, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 2}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 2}",100.0,90.0,10.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 2}",100.0,80.0,10.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 2}",100.0,70.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 2}",80.0,30.000001907348633,0.0,80.0
+random_threshold,"{'threshold': 99, 'bound': 2}",40.0,0.0,0.0,30.000001907348633
+random_threshold,"{'threshold': 10, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 3}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 3}",100.0,100.0,90.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 3}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 3}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 3}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 3}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 3}",80.0,70.0,0.0,80.0
+random_threshold,"{'threshold': 10, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 4}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 4}",100.0,100.0,70.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 4}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 4}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 4}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 4}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 4}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 5}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 5}",100.0,100.0,50.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 5}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 5}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 5}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 5}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 5}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 6}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 6}",100.0,100.0,50.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 6}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 6}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 6}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 6}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 6}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 7}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 7}",100.0,100.0,40.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 7}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 7}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 7}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 7}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 7}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 8}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 8}",100.0,100.0,40.0,100.0
+random_threshold,"{'threshold': 95, 'bound': 8}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 8}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 8}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 8}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 8}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 9}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 9}",100.0,100.0,30.000001907348633,100.0
+random_threshold,"{'threshold': 95, 'bound': 9}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 9}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 9}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 9}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 9}",100.0,90.0,0.0,100.0
+random_threshold,"{'threshold': 10, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 20, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 30, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 40, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 50, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 60, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 70, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 80, 'bound': 10}",100.0,100.0,100.0,100.0
+random_threshold,"{'threshold': 90, 'bound': 10}",100.0,100.0,30.000001907348633,100.0
+random_threshold,"{'threshold': 95, 'bound': 10}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 96, 'bound': 10}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 97, 'bound': 10}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 98, 'bound': 10}",100.0,100.0,0.0,100.0
+random_threshold,"{'threshold': 99, 'bound': 10}",100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 10},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 20},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 30},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 40},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 50},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 60},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 70},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 80},100.0,100.0,100.0,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 90},100.0,100.0,30.000001907348633,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 95},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 96},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 97},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 98},100.0,100.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
+mat_threshold,{'threshold': 99},100.0,90.0,0.0,100.0
