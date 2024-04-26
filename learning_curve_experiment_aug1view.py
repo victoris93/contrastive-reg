@@ -20,10 +20,8 @@ from sklearn.model_selection import (
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
-from augmentations import augs
+from augmentations import augs, aug_args
 import glob, os, shutil
-
-
 
 torch.cuda.empty_cache()
 multi_gpu = True
@@ -108,56 +106,6 @@ class MLP(nn.Module):
        x_embedding = self.transform_feat(x)
        y_embedding = self.transform_targets(y)
        return x_embedding, y_embedding
-
-# %%
-# class MatData(Dataset):
-#     def __init__(self, path_feat, path_target, target_name, indices, transform = None, transform_params = None, threshold = 0, random_state=42):
-
-#         # Load the entire dataset
-#         features = np.load(path_feat, mmap_mode="r").astype(np.float32)[indices]
-#         targets = pd.read_csv(path_target)[target_name].values[indices]
-#         targets = np.expand_dims(targets, axis = 1)
-
-#         self.n_sub = len(features)
-#         self.n_views = 1
-#         self.transform = transform
-#         self.targets = targets
-#         self.transform_params = transform_params if transform_params is not None else {}
-        
-#         vectorized_feat = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in features])
-        
-#         if threshold > 0:
-#             thrs = np.quantile(np.abs(vectorized_feat), q=threshold, axis=1, keepdims=True)
-#             vectorized_feat = vectorized_feat * (np.abs(vectorized_feat) >= thrs)
-        
-#         self.n_features = vectorized_feat.shape[-1]
-        
-#         if transform is not None:
-#             # apply augmentation only in training mode!
-#             if transform != "copy":
-#                 augmented_features = np.array([self.transform(sample, **self.transform_params) for sample in features])
-#                 augmented_features = np.array([sym_matrix_to_vec(mat, discard_diagonal=True) for mat in augmented_features])
-#                 self.n_views = self.n_views + augmented_features.shape[1]
-#                 self.features = np.zeros((self.n_sub, self.n_views, self.n_features))
-#                 for sub in range(self.n_sub):
-#                     self.features[sub, 0, :] = vectorized_feat[sub]
-#                     self.features[sub, 1:, :] = augmented_features[sub]
-#             else:
-#                 self.features = np.repeat(np.expand_dims(vectorized_feat, axis = 1), 2, axis=1)
-#         else:
-#             self.features = np.expand_dims(vectorized_feat, axis = 1)
-
-#         self.features = torch.from_numpy(self.features).to(torch.float32)
-#         self.targets = torch.tensor(self.targets, dtype=torch.float32)
-#         gc.collect()
-
-#     def __len__(self):
-#         return len(self.features)
-
-#     def __getitem__(self, idx):
-#         features = self.features[idx]
-#         targets = self.targets[idx]
-#         return features, targets
 
 # %%
 class MatData(Dataset):
@@ -488,7 +436,7 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
             )
     loss_terms = pd.DataFrame(loss_terms)
     return loss_terms, model
-
+# %%
 class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
@@ -527,7 +475,8 @@ class Experiment(submitit.helpers.Checkpointable):
 
             if AUGMENTATION is not None:
                 transform = augs[AUGMENTATION]
-                aug_features = np.array([transform(sample, threshold) for sample in train_features]).squeeze(1)
+                transform_args = aug_args[AUGMENTATION]
+                aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
 
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 aug_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
@@ -580,7 +529,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def save(self, path: Path):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
-
+# %%
 random_state = np.random.RandomState(seed=42)
 dataset = MatData("matrices.npy", "participants.csv", "age", threshold=0)
 n_sub = len(dataset)
@@ -656,6 +605,6 @@ prediction_metrics = [
 ]
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
-
-prediction_metrics.to_csv(f"results/prediction_metrics_aug1view_thresh{int(THRESHOLD)}.csv", index=False)
-
+if AUGMENTATION is not None:
+    prediction_metrics["aug_args"] = aug_args[AUGMENTATION]
+prediction_metrics.to_csv(f"results/prediction_metrics_{AUGMENTATION}.csv", index=False)
