@@ -1,35 +1,47 @@
 import numpy as np
-from nilearn.connectome import sym_matrix_to_vec
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.linalg import pinv, diagsvd
 from sklearn.utils.extmath import randomized_svd
 
+def threshMat(conn, thresh):
+    perc = np.percentile(np.abs(conn), thresh, axis=1)  # Calculate the percentile along each matrix
+    mask = np.abs(conn) > perc[:, None]
+    thresh_mat = conn * mask
+    return thresh_mat, perc
 
-def random_threshold_augmentation(features):
-    threshold = np.quantile(features, 0.8)
-    features_thresholded = np.where(np.abs(features) > threshold, 0, features)
-    random_values = np.random.uniform(0, threshold / 10, features.shape)
+def random_threshold_augmentation(features, threshold):
+    features_thresholded, threshold = threshMat(features, threshold)
+    random_values = np.random.uniform(0, threshold, features.shape)
     augmented_features = np.where(features_thresholded == 0, random_values, features_thresholded)
-    norm = np.linalg.norm(augmented_features)
-    normalized_features = augmented_features / norm if norm != 0 else augmented_features
-    return normalized_features
+#     norm = np.linalg.norm(augmented_features)
+#     normalized_features = augmented_features / norm if norm != 0 else augmented_features
+    return augmented_features
 
-def flipping_threshold_augmentation(features, hemisphere_size=None):
-    threshold = np.quantile(features, 0.95)
-    features_thresholded = np.where(features < threshold, 0, features)
+def flipping_threshold_augmentation(features, threshold, max_attempts, hemisphere_size=None):
+    features_thresholded, _ = threshMat(features, threshold)
     zero_indices = np.argwhere(features_thresholded == 0)
+    print(zero_indices.shape)
+    
     if hemisphere_size is None:
         hemisphere_size = features.shape[0] // 2
-    if zero_indices.size > 0:
-        selected_idx = np.random.choice(zero_indices)
-        selected_pairs = []
-        region1 = selected_idx[0]
-        opposite_region = region1 + hemisphere_size if region1 < hemisphere_size else region1 - hemisphere_size
-        if features_thresholded[opposite_region, selected_idx[1]] == 0:
-            selected_pairs.append([region1, opposite_region])
-        if selected_pairs:
-            flipped_matrices = flip_edge_between_regions(features, selected_pairs)
-            return flipped_matrices
-    return features
+    
+    attempt = 0
+    max_attempts = max_attempts  
+    
+    while attempt < max_attempts:
+            selected_idx = zero_indices[np.random.choice(zero_indices.shape[0])]
+            region1 = selected_idx[0]
+            opposite_region = region1 + hemisphere_size if region1 < hemisphere_size else region1 - hemisphere_size
+            
+            if features_thresholded[opposite_region, selected_idx[1]] == 0:
+                selected_pairs = [[region1, opposite_region]]
+                flipped_matrices = flip_edge_between_regions(features, selected_pairs)
+            else:
+                print(f"Attempt {attempt}: no valid pair found.")
+                flipped_matrices = None
+            attempt += 1
+
+    return flipped_matrices
 
 def SVD_augmentation(X, n_components, n_iter, noise_factor, random_state=42):
     X_pinv = pinv(X)
@@ -79,5 +91,10 @@ augs = {
     "random_threshold_augmentation": random_threshold_augmentation,
     "flipping_threshold_augmentation": flipping_threshold_augmentation,
     "SVD_augmentation": SVD_augmentation,
-    "flip_edge_between_regions": flip_edge_between_regions
+}
+
+aug_args = {
+    "random_threshold_augmentation": {"threshold": 60},
+    "flipping_threshold_augmentation": {"threshold": 60, "max_attempts" : 100, "hemisphere_size": None},
+    "SVD_augmentation": {"n_components": 10, "n_iter": 5, "noise_factor": 0.01, "random_state":42}
 }
