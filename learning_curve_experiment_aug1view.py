@@ -1,3 +1,4 @@
+# %%
 import math
 import asyncio
 import submitit
@@ -33,8 +34,8 @@ multi_gpu = True
 # %%
 
 # %%
-THRESHOLD = float(sys.argv[1])
-AUGMENTATION = sys.argv[2]
+# THRESHOLD = float(sys.argv[1])
+AUGMENTATION = sys.argv[1]
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -139,7 +140,7 @@ class MatData(Dataset):
         target = self.target[idx]
         return matrix, target
 
-# %% 
+# %%
 # loss from: https://github.com/EIDOSLAB/contrastive-brain-age-prediction/blob/master/src/losses.py
 # modified to accept input shape [bsz, n_feats]. In the age paper: [bsz, n_views, n_feats].
 class KernelizedSupCon(nn.Module):
@@ -441,7 +442,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, threshold = THRESHOLD, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, threshold = 0, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -476,10 +477,11 @@ class Experiment(submitit.helpers.Checkpointable):
             if AUGMENTATION is not None:
                 transform = augs[AUGMENTATION]
                 transform_args = aug_args[AUGMENTATION]
+                
                 aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
 
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                aug_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+                aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
 
                 # n_views = n_views + aug_features.shape[1]
                 n_features = train_features.shape[-1]
@@ -490,6 +492,7 @@ class Experiment(submitit.helpers.Checkpointable):
                 new_train_features[:n_samples, 0, :] = train_features
                 new_train_features[n_samples:, 0, :] = aug_features
 
+                train_features = new_train_features
                 train_targets = np.concatenate([train_targets]*2, axis=0)
             else:
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
@@ -574,14 +577,7 @@ if multi_gpu:
             experiment_results.append(res)
         return experiment_results
     experiment_results = asyncio.run(get_result(experiment_jobs))
-    
-    # Remove log files
-    log_paths = glob.glob(f'log_folder/{job.job_id}*')
-    for path in log_paths:
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-    else:
-        os.remove(path)
+
 else:
     experiment_results = []
     for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
