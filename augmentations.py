@@ -5,16 +5,18 @@ from sklearn.utils.extmath import randomized_svd
 import random
 
 
-def random_threshold_augmentation(features):
-    threshold = np.quantile(features, 0.8)
-    features_thresholded = np.where(np.abs(features) > threshold, 0, features)
-    random_values = np.random.uniform(0, threshold / 10, features.shape)
-    augmented_features = np.where(features_thresholded == 0, random_values, features_thresholded)
-    norm = np.linalg.norm(augmented_features)
-    normalized_features = augmented_features / norm if norm != 0 else augmented_features
-    normalized_features = np.expand_dims(normalized_features, axis=0)
-
-    return normalized_features
+def random_threshold(matrices, threshold, bound = 1): # as in Margulies et al. (2016)
+    
+    perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
+    mask = np.abs(matrices) >= perc
+    thresh_mat = matrices * mask
+    
+    random_values = np.random.uniform(-1/bound,1/bound, matrices.shape) * perc
+    random_values_masked = random_values * (1-mask)
+    
+    mat = thresh_mat + random_values_masked
+    
+    return mat
 
 def flipping_threshold_augmentation(features, hemisphere_size=None):
     threshold = np.quantile(features, 0.95)
