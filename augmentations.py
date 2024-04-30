@@ -37,11 +37,10 @@ def flipping_threshold_augmentation(matrix, threshold, hemisphere_size=None):
         if (matrix_thresholded[edge_left] == 0) & (matrix_thresholded[edge_right] == 0):
             flip_index_pairs.append([edge_left, edge_right])
             
-    print(len(flip_index_pairs))                          
     flipped_matrix = flip_edges(matrix, flip_index_pairs)
             
 
-    return flipped_matrix, flip_index_pairs
+    return flipped_matrix
 
 def SVD_augmentation(X, n_components, n_iter, noise_factor, random_state=42):
     X_pinv = pinv(X)
@@ -69,6 +68,7 @@ def flip_edges(matrix, edge_idx, vectorize_mat=False):
         flipped_matrix[indices_right] = edge_left
         
     if vectorize_mat:
+        # Assuming 'sym_matrix_to_vec' is a function you have that vectorizes a symmetric matrix
         flipped_matrix = sym_matrix_to_vec(flipped_matrix, discard_diagonal=True)
         
         
