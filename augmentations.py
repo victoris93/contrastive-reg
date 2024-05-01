@@ -10,7 +10,7 @@ def threshMat(conn, thresh):
     thresh_mat = conn * mask
     return thresh_mat, mask, perc
 
-def random_threshold(matrices, threshold, bound = 1): # as in Margulies et al. (2016)
+def random_threshold_augmentation(matrices, threshold, bound = 1): # as in Margulies et al. (2016)
     
     thresh_mat, mask, perc = threshMat(matrices, threshold)
     random_values = np.random.uniform(-1/bound,1/bound, matrices.shape) * perc
@@ -19,14 +19,6 @@ def random_threshold(matrices, threshold, bound = 1): # as in Margulies et al. (
     mat = thresh_mat + random_values_masked
     
     return mat
-
-def random_threshold_augmentation(features, threshold):
-    features_thresholded, threshold = threshMat(features, threshold)
-    random_values = np.random.uniform(0, threshold, features.shape)
-    augmented_features = np.where(features_thresholded == 0, random_values, features_thresholded)
-#     norm = np.linalg.norm(augmented_features)
-#     normalized_features = augmented_features / norm if norm != 0 else augmented_features
-    return augmented_features
 
 def flipping_threshold_augmentation(matrix, threshold, hemisphere_size=None):
     matrix_thresholded, _, _ = threshMat(matrix, threshold)
@@ -89,7 +81,7 @@ augs = {
 }
 
 aug_args = {
-    "random_threshold_augmentation": {"threshold": 60},
+    "random_threshold_augmentation": {"threshold": 60,"bound" : 1},
     "flipping_threshold_augmentation": {"threshold": 60, "hemisphere_size": None},
     "SVD_augmentation": {"n_components": 10, "n_iter": 5, "noise_factor": 0.01, "random_state":42}
 }
