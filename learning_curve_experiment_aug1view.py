@@ -32,8 +32,6 @@ multi_gpu = True
 # -
 
 # %%
-
-# %%
 # THRESHOLD = float(sys.argv[1])
 AUGMENTATION = sys.argv[1]
 
@@ -602,5 +600,5 @@ prediction_metrics = [
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 if AUGMENTATION is not None:
-    prediction_metrics["aug_args"] = aug_args[AUGMENTATION]
+    prediction_metrics["aug_args"] = str(aug_args[AUGMENTATION])[1:-1]
 prediction_metrics.to_csv(f"results/prediction_metrics_{AUGMENTATION}.csv", index=False)
