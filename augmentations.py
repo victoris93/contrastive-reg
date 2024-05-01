@@ -8,7 +8,17 @@ def threshMat(conn, thresh):
     perc = np.percentile(np.abs(conn), thresh, axis=1)  # Calculate the percentile along each matrix
     mask = np.abs(conn) > perc[:, None]
     thresh_mat = conn * mask
-    return thresh_mat, perc
+    return thresh_mat, mask, perc
+
+def random_threshold(matrices, threshold, bound = 1): # as in Margulies et al. (2016)
+    
+    thresh_mat, mask, perc = threshMat(matrices, threshold)
+    random_values = np.random.uniform(-1/bound,1/bound, matrices.shape) * perc
+    random_values_masked = random_values * (1-mask)
+    
+    mat = thresh_mat + random_values_masked
+    
+    return mat
 
 def random_threshold_augmentation(features, threshold):
     features_thresholded, threshold = threshMat(features, threshold)
@@ -18,10 +28,8 @@ def random_threshold_augmentation(features, threshold):
 #     normalized_features = augmented_features / norm if norm != 0 else augmented_features
     return augmented_features
 
-matrix = np.load("matrices.npy")[0]
-
 def flipping_threshold_augmentation(matrix, threshold, hemisphere_size=None):
-    matrix_thresholded, _ = threshMat(matrix, threshold)
+    matrix_thresholded, _, _ = threshMat(matrix, threshold)
     
     if hemisphere_size is None:
         hemisphere_size = 500
