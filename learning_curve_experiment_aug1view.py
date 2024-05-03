@@ -33,7 +33,10 @@ multi_gpu = True
 
 # %%
 # THRESHOLD = float(sys.argv[1])
-AUGMENTATION = sys.argv[1]
+# AUGMENTATION = sys.argv[1]
+
+# %%
+AUGMENTATION = ['random_threshold_augmentation', 'flipping_threshold_augmentation']
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -440,7 +443,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, threshold = 0, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, threshold = 0, augmentations = None, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -465,33 +468,36 @@ class Experiment(submitit.helpers.Checkpointable):
             train_dataset = Subset(dataset, train_indices)
             test_dataset = Subset(dataset, test_indices)
             ### Augmentation
-            n_views = 1
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
 
             test_features= train_dataset.dataset.matrices[test_dataset.indices].numpy()
             test_targets = train_dataset.dataset.target[test_dataset.indices].numpy()
 
-            if AUGMENTATION is not None:
-                transform = augs[AUGMENTATION]
-                transform_args = aug_args[AUGMENTATION]
-                
-                aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
-
-                train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
-
-                # n_views = n_views + aug_features.shape[1]
-                n_features = train_features.shape[-1]
+            if augmentations is not None:
+#                 aug_params = {}
+                if not isinstance(augmentations, list):
+                    augmentations = [augmentations]
+                n_augs = len(augmentations)
+                vect_train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
                 n_samples = len(train_dataset)
-                n_augs = len(aug_features)
+                n_features = vect_train_features.shape[-1]
+                new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
+                new_train_features[:n_samples, 0, :] = vect_train_features
 
-                new_train_features = np.zeros((n_samples + n_augs, 1, n_features))
-                new_train_features[:n_samples, 0, :] = train_features
-                new_train_features[n_samples:, 0, :] = aug_features
+                for i, aug in enumerate(AUGMENTATION):
+                    transform = augs[aug]
+                    transform_args = aug_args[aug]
+#                     aug_params[aug] = transform_args # to save later in the metrics df
+
+                    num_aug = i + 1
+                    aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
+                    aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
+
+                    new_train_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
 
                 train_features = new_train_features
-                train_targets = np.concatenate([train_targets]*2, axis=0)
+                train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
             else:
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 train_features = np.expand_dims(train_features, axis = 1)
@@ -521,7 +527,7 @@ class Experiment(submitit.helpers.Checkpointable):
         if path:
             self.save(path)
         
-        return self.results
+        return self.results, 
 
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
@@ -565,7 +571,7 @@ if multi_gpu:
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
                 run_experiment = Experiment()
-                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, random_state=random_state, device=None)
+                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
                 experiment_jobs.append(job)
 
     async def get_result(experiment_jobs):
@@ -583,7 +589,7 @@ else:
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
             run_experiment = Experiment()
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, random_state=random_state, device=None)
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
             experiment_results.append(job)
 
 # %%
@@ -599,6 +605,6 @@ prediction_metrics = [
 ]
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
-if AUGMENTATION is not None:
-    prediction_metrics["aug_args"] = str(aug_args[AUGMENTATION])[1:-1]
+# if AUGMENTATION is not None:
+#     prediction_metrics["aug_args"] = str(aug_args)
 prediction_metrics.to_csv(f"results/prediction_metrics_{AUGMENTATION}.csv", index=False)
