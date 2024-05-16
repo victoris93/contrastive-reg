@@ -24,8 +24,11 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 from augmentations import augs, aug_args
 import re
+import torch_geometric as tg
+from copy import copy
 
 torch.cuda.empty_cache()
+
 multi_gpu = True
 
 from torch_geometric.nn import GCNConv, global_mean_pool
@@ -35,8 +38,13 @@ from os import listdir
 from os.path import isfile, join
 from torch_geometric.nn import Sequential as graph_sequential
 from torch_geometric.loader import DataLoader as graph_dataloader
+from torch_geometric.utils import dense_to_sparse
+from torch_geometric.transforms.line_graph import LineGraph
 
-# AUGMENTATION = sys.argv[1]
+# data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
+# -
+
+THRESHOLD = 99
 
 AUGMENTATION = None
 
@@ -48,10 +56,10 @@ class GCN(torch.nn.Module):
         
         super(GCN, self).__init__()
         
-        self.feat_gcn = graph_sequential('x, edge_index, edge_weight', [
-            (GCNConv(input_dim_feat, hidden_dim_feats), 'x, edge_index, edge_weight -> x'),
+        self.feat_gcn = graph_sequential('x, edge_index', [
+            (GCNConv(input_dim_feat, hidden_dim_feats), 'x, edge_index -> x'),
             nn.ReLU(),
-            (GCNConv(hidden_dim_feats, hidden_dim_feats), 'x, edge_index, edge_weight -> x'),
+            (GCNConv(hidden_dim_feats, hidden_dim_feats), 'x, edge_index -> x'),
             nn.ReLU(),
             (nn.Linear(hidden_dim_feats, output_dim), 'x -> x')
         ])
@@ -72,7 +80,6 @@ class GCN(torch.nn.Module):
             nn.Linear(hidden_dim_feats, input_dim_target)
         )
     
-    
         
     def init_weights(self):
         for m in self.modules():
@@ -84,11 +91,9 @@ class GCN(torch.nn.Module):
             # GCNConv initializes its weights during initialization
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
-                    
-
     
-    def transform_feat(self, x, edge_index, edge_weight, batch):
-        features = self.feat_gcn(x, edge_index, edge_weight)
+    def transform_feat(self, x, edge_index, batch):
+        features = self.feat_gcn(x, edge_index)
 
         pooling = global_mean_pool(features, batch)
         pooling_normalized = nn.functional.normalize(pooling, p=2, dim=1)
@@ -97,7 +102,6 @@ class GCN(torch.nn.Module):
     
     def transform_targets(self, y):
         targets = self.target_mlp(y)
-
         targets = nn.functional.normalize(targets, p=2, dim=1)
         
         return targets
@@ -106,8 +110,8 @@ class GCN(torch.nn.Module):
         return self.decode_target(embedding)
 
         
-    def forward(self, x, y, edge_index, edge_weight, batch):
-        x_embedding = self.transform_feat(x, edge_index, edge_weight, batch)
+    def forward(self, x, y, edge_index, batch):
+        x_embedding = self.transform_feat(x, edge_index, batch)
         y_embedding = self.transform_targets(y)
         return x_embedding, y_embedding
     
@@ -117,19 +121,36 @@ class GCN(torch.nn.Module):
 
 
 class GraphData(graph_dataset):
-    def __init__(self, path_feat, path_target, target_name, indices, augmentations = None):
+    def __init__(self, path_feat, path_target, target_name, indices, to_line_graph=True, augmentations = None, threshold = 0, preprocess = True):
         
         self.path_feat = path_feat
+        self.preproc_dir =join(self.path_feat, 'preprocessed') 
+        self.indices = indices
         self.path_target = path_target
         self.augmentations = augmentations
-        
-        self.features = np.array([np.load(i) for i in self.raw_file_names[indices]])
-        self.targets = np.expand_dims(
-                pd.read_csv(path_target)[target_name].values[indices], axis=1
-            )
+        self.preprocess = preprocess
+        self.to_line_graph = to_line_graph
 
-        self.graphs, self.targets = self.process(self.features, self.targets)
-        self.targets = torch.FloatTensor(self.targets)
+        self.features = np.array([np.load(i) for i in self.raw_file_names[self.indices]])
+        
+        no_diag_features = [] # setting the diagonal to 0
+        for feature in self.features:
+            no_diag_feature = np.copy(feature)
+            np.fill_diagonal(no_diag_feature, 0)
+            no_diag_features.append(no_diag_feature)
+
+        self.features = no_diag_features
+        
+        if threshold > 0:
+            self.features = self._threshold(self.features, threshold)
+            
+        self.targets = np.expand_dims(
+                pd.read_csv(path_target)[target_name].values[self.indices], axis=1
+            )
+    
+
+        self.graphs, self.targets = self._preprocess(self.features, self.targets)
+        
         gc.collect()
 
     @property
@@ -138,13 +159,19 @@ class GraphData(graph_dataset):
         raw_file_names = sorted(raw_file_names, key=lambda x: int(re.search(r'\d+', x).group()))
         raw_file_names = np.array(raw_file_names)
         return raw_file_names
-
+    
+    @property
+    def preprocessed_file_names(self):
+        if not os.path.exists(self.preproc_dir):
+            os.makedirs(self.preproc_dir)
+        preprocessed_file_names = [join(self.preproc_dir, f'graph_{idx}') for idx in self.indices]
+        return preprocessed_file_names
+    
     @property
     def show_indices(self):
         return self.indices
     
-    def process(self, features, targets):
-        ### AUGMENTATIONS
+    def _preprocess(self, features, targets):
         n_augs = 0
         if self.augmentations is not None:
             aug_samples = []
@@ -152,24 +179,38 @@ class GraphData(graph_dataset):
                 self.augmentations = [self.augmentations]
                 
             n_augs = len(self.augmentations)
-            for func in self.augmentations:
-                transform = augs[func]
-                transform_args = aug_args[func]
-                for sample in features:
-                    aug_features = transform(sample, **transform_args)
-                    aug_samples.append(aug_features)
-                        
-            aug_samples = np.array(aug_samples)
-            features = np.concatenate([features, aug_samples], axis=0)
+        if self.preprocess:
+            if self.augmentations is not None:
+                ### AUGMENTATIONS
+                print("preprocessing")
+                for func in self.augmentations:
+                    transform = augs[func]
+                    transform_args = aug_args[func]
+                    for sample in features:
+                        aug_features = transform(sample, **transform_args)
+
+                        aug_samples.append(aug_features)
+
+                aug_samples = np.array(aug_samples)
+                features = np.concatenate([features, aug_samples], axis=0)
+                ### GRAPH CONSTRUCTION
+            graphs = []
+            for sample in tqdm(features, desc="Processing samples"):
+                graph = self.make_graph(sample)
+                graphs.append(graph)
+            self.save_preprocessed_graphs(graphs)
+            print("Preprocessed graphs saved.")
         targets = np.concatenate([targets]*(n_augs + 1), axis=0)
         targets = np.array(targets)
-#         targets = torch.FloatTensor(targets)
-        ### GRAPH CONSTRUCTION
-        graphs = []
-        for sample in tqdm(features, desc="Processing samples"):
-            graph = self.make_graph(sample)
-            graphs.append(graph)
+        targets = torch.FloatTensor(targets)
+        graphs = self.load_preprocessed_graphs()
         return graphs, targets
+    
+    def _threshold(self, matrices, threshold): # as in Margulies et al. (2016)
+        perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
+        mask = np.abs(matrices) >= perc
+        thresh_mat = matrices * mask
+        return thresh_mat
     
     def get_edge_indices(self, feat_sample):
 #         idx_upper_tri = np.triu_indices_from(feat_sample, k=1)  # k=1 excludes the diagonal
@@ -187,7 +228,28 @@ class GraphData(graph_dataset):
         x = torch.ones(num_nodes,1)
         edge_index, edge_attr = dense_to_sparse(feat_sample)
         graph = graph_data(x=x, edge_index=edge_index, edge_attr = edge_attr)
+        if self.to_line_graph:
+            graph = self._to_line_graph(copy(graph))
         return graph
+    
+    def _to_line_graph(self,graph):
+        lgf = LineGraph()
+        line_graph = lgf.forward(copy(graph))
+        return line_graph
+    
+    def save_preprocessed_graphs(self, graphs):
+        for i, graph in enumerate(graphs):
+            file_path = self.preprocessed_file_names[i]
+            with open(file_path, 'wb') as f:
+                pickle.dump(graph, f)
+
+    def load_preprocessed_graphs(self):
+        graphs = []
+        for file_path in self.preprocessed_file_names:
+            with open(file_path, 'rb') as f:
+                graph = pickle.load(f)
+            graphs.append(graph)
+        return graphs
     
     def __len__(self):
         return len(self.graphs)
@@ -425,17 +487,15 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                 targets = targets.to(device)
                 graphs = graphs.to(device)
                 
-                nodes = graphs.x.float()
+                nodes = graphs.x.float().view(-1, 1)
                 edge_index = graphs.edge_index.long()
-                edge_weight = graphs.edge_attr.float()
+#                 edge_weight = graphs.edge_attr.float()
                 batch = graphs.batch
                 
 #                 bsz = targets.shape[0]
                 optimizer.zero_grad()
                 
-                out_feat, out_target = model(nodes, targets, edge_index, edge_weight, batch)#, edge_attributes)
-                print("out_feat", out_feat.shape)
-                print("out_target", out_target.shape)
+                out_feat, out_target = model(nodes, targets, edge_index, batch)#, edge_attributes
                 
                 joint_embedding = nn.functional.mse_loss(out_feat, out_target)
                 kernel_feature = criterion_pft(out_feat.unsqueeze(1), targets)
@@ -465,14 +525,14 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
             with torch.no_grad():
                 for graphs, targets in test_loader:
                     graphs = graphs.to(device)
-#                     targets = targets.to(device)
+                    targets = targets.to(device)
                     
-                    nodes = graphs.x.float()
+                    nodes = graphs.x.float().view(-1, 1)
                     edge_index = graphs.edge_index.long()
-                    edge_weight = graphs.edge_attr.float()
+#                     edge_weight = graphs.edge_attr.float()
                     batch = graphs.batch
                     
-                    out_feat = model.transform_feat(nodes, edge_index, edge_weight, batch)
+                    out_feat = model.transform_feat(nodes, edge_index, batch)
                     out_target_decoded = model.decode_target(out_feat)
                     
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
@@ -495,7 +555,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, feat_path, target_path, target_name, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, feat_path, target_path, target_name, threshold, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -508,9 +568,8 @@ class Experiment(submitit.helpers.Checkpointable):
             experiment_indices = random_state.choice(indices, experiment_size, replace=False)
             train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
             
-            train_dataset = GraphData(feat_path, target_path, target_name, train_indices, augmentations = AUGMENTATION)
-            test_dataset = GraphData(feat_path, target_path, target_name, test_indices, augmentations = None)
-            
+            train_dataset = GraphData(feat_path, target_path, target_name, train_indices, to_line_graph=True, threshold = threshold,augmentations = AUGMENTATION, preprocess = False)
+            test_dataset = GraphData(feat_path, target_path, target_name, test_indices,to_line_graph=True, threshold = threshold, augmentations = None, preprocess = False)
             
             loss_terms, model = train(train_dataset, test_dataset, model = None, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
@@ -528,13 +587,13 @@ class Experiment(submitit.helpers.Checkpointable):
                     for graphs, targets in loader:
                         
                         graphs = graphs.to(device)
+                        targets = targets.to(device)
                         
-                        nodes = graphs.x.float()
+                        nodes = graphs.x.float().view(-1, 1)
                         edge_index = graphs.edge_index.long()
-                        edge_weight = graphs.edge_attr.float()
                         batch = graphs.batch
 
-                        y_pred = model.decode_target(model.transform_feat(nodes, edge_index, edge_weight, batch))
+                        y_pred = model.decode_target(model.transform_feat(nodes, edge_index, batch))
                         preds.extend(y_pred)
                         y.extend(targets)
                     preds = torch.concat(preds)
@@ -588,7 +647,7 @@ if multi_gpu:
             experiment_size = test_size + train_size
             for experiment in tqdm(range(experiments)):
                 run_experiment = Experiment()
-                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, path_feat, path_target, target_name, random_state, device)
+                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, path_feat, path_target, target_name, THRESHOLD, random_state, device)
                 experiment_jobs.append(job)
 
     async def get_result(experiment_jobs):
@@ -606,7 +665,7 @@ else:
         experiment_size = test_size + train_size
         for experiment in tqdm(range(experiments), desc="Experiment"):
             run_experiment = Experiment()
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, path_feat, path_target, target_name, random_state, device)
+            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, path_feat, path_target, target_name, THRESHOLD, random_state, device)
             experiment_results.append(job)
 
 losses, predictions = zip(*experiment_results)
@@ -623,3 +682,5 @@ prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(data
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
 prediction_metrics.to_csv(f"results/prediction_metrics_graph_no_aug.csv", index=False)
+
+
