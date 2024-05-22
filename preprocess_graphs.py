@@ -17,12 +17,13 @@ from torch_geometric.transforms.line_graph import LineGraph
 from augmentations import augs, aug_args
 from torch_geometric.transforms import ToUndirected
 
-
-feat_path = "./matrices"
+feat_path = "./matrices/schaefer400"
 target_path = "participants.csv"
 target_name = "age"
 
 index = int(sys.argv[1])
+
+# +
 
 class GraphData(graph_dataset):
     def __init__(self, path_feat, path_target, target_name, indices, to_line_graph=True, augmentations = None, threshold = 0, preprocess = True):
@@ -125,21 +126,16 @@ class GraphData(graph_dataset):
         return edge_indices
 
     def make_graph(self, feat_sample):
-        #edge_index = self.get_edge_indices(feat_sample)
         feat_sample = torch.tensor(feat_sample)
         num_nodes = feat_sample.size(0)
-        edge_index, edge_attr = dense_to_sparse(feat_sample)
-        graph = graph_data(edge_index=edge_index, edge_attr = edge_attr, num_nodes = num_nodes)
-        if self.to_line_graph:
-            graph = self._to_line_graph(graph)
+        edge_index = torch.triu_indices(*feat_sample.shape, offset=1)
+        edge_attr = feat_sample[edge_index[0], edge_index[1]]
+        graph = graph_data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=num_nodes)
         ToUndir = ToUndirected()
-        graph = ToUndir.forward(graph) # make sure the graph is undirected
+        graph = ToUndir.forward(graph)
+        graph = LineGraph()(copy(graph))
+        print("Is line graph directed? ", graph.is_directed())
         return graph
-    
-    def _to_line_graph(self,graph):
-        lgf = LineGraph()
-        line_graph = lgf.forward(copy(graph))
-        return line_graph
     
     def save_preprocessed_graphs(self, graphs):
         for i, graph in enumerate(graphs):
@@ -160,6 +156,7 @@ class GraphData(graph_dataset):
 
     def __getitem__(self, idx):
         return self.graphs[idx], self.targets[idx]
-    
-graph_data_instance = GraphData(feat_path, target_path, target_name, [index], to_line_graph=True, augmentations=None, threshold=99, preprocess=True)
+# -
+
+graph_data_instance = GraphData(feat_path, target_path, target_name, [index], to_line_graph=True, augmentations=None, threshold=0, preprocess=True)
 print(f'Processed graph for index {index}')

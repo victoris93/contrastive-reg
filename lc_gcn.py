@@ -1,3 +1,4 @@
+# %%
 import math
 import asyncio
 import submitit
@@ -31,6 +32,7 @@ torch.cuda.empty_cache()
 
 multi_gpu = True
 
+# %%
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Dataset as graph_dataset
 from torch_geometric.data import Data as graph_data
@@ -40,16 +42,18 @@ from torch_geometric.nn import Sequential as graph_sequential
 from torch_geometric.loader import DataLoader as graph_dataloader
 from torch_geometric.utils import dense_to_sparse
 from torch_geometric.transforms.line_graph import LineGraph
+from torch_geometric.transforms import ToUndirected
 
-# data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
-# -
+# %%
+THRESHOLD = int(sys.argv[1])
 
-THRESHOLD = 99
-
+# %%
 AUGMENTATION = None
 
+# %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# %%
 
 class GCN(torch.nn.Module):
     def __init__(self, input_dim_feat, input_dim_target, hidden_dim_feats,  output_dim, dropout_rate, lr, weight_decay):
@@ -119,6 +123,7 @@ class GCN(torch.nn.Module):
         optimizer = optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
         return optimizer
 
+# %%
 
 class GraphData(graph_dataset):
     def __init__(self, path_feat, path_target, target_name, indices, to_line_graph=True, augmentations = None, threshold = 0, preprocess = True):
@@ -148,9 +153,8 @@ class GraphData(graph_dataset):
                 pd.read_csv(path_target)[target_name].values[self.indices], axis=1
             )
     
-
-        self.graphs, self.targets = self._preprocess(self.features, self.targets)
         
+        self.graphs, self.targets = self._preprocess(self.features, self.targets)
         gc.collect()
 
     @property
@@ -222,20 +226,16 @@ class GraphData(graph_dataset):
         return edge_indices
 
     def make_graph(self, feat_sample):
-        #edge_index = self.get_edge_indices(feat_sample)
         feat_sample = torch.tensor(feat_sample)
         num_nodes = feat_sample.size(0)
-        x = torch.ones(num_nodes,1)
-        edge_index, edge_attr = dense_to_sparse(feat_sample)
-        graph = graph_data(x=x, edge_index=edge_index, edge_attr = edge_attr)
-        if self.to_line_graph:
-            graph = self._to_line_graph(copy(graph))
+        edge_index = torch.triu_indices(*feat_sample.shape, offset=1)
+        edge_attr = feat_sample[edge_index[0], edge_index[1]]
+        graph = graph_data(edge_index=edge_index, edge_attr=edge_attr, num_nodes=num_nodes)
+        ToUndir = ToUndirected()
+        graph = ToUndir.forward(graph)
+        graph = LineGraph()(copy(graph))
+        print("Is line graph directed? ", graph.is_directed())
         return graph
-    
-    def _to_line_graph(self,graph):
-        lgf = LineGraph()
-        line_graph = lgf.forward(copy(graph))
-        return line_graph
     
     def save_preprocessed_graphs(self, graphs):
         for i, graph in enumerate(graphs):
@@ -257,6 +257,7 @@ class GraphData(graph_dataset):
     def __getitem__(self, idx):
         return self.graphs[idx], self.targets[idx]
 
+# %%
 # loss from: https://github.com/EIDOSLAB/contrastive-brain-age-prediction/blob/master/src/losses.py
 # modified to accept input shape [bsz, n_feats]. In the age paper: [bsz, n_views, n_feats].
 class KernelizedSupCon(nn.Module):
@@ -414,6 +415,8 @@ class KernelizedSupCon(nn.Module):
         loss = -(self.temperature / self.base_temperature) * log_prob
         return loss.mean()
 
+
+# %%
 def gaussian_kernel(x, krnl_sigma):
     x = x - x.T
     return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (
@@ -430,14 +433,16 @@ def cauchy(x, krnl_sigma):
     x = x - x.T
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
-def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
+
+# %%
+def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=200, batch_size=32):
     input_dim_feat = 1
     # the rest is arbitrary
     hidden_dim_feat = 64
    
     input_dim_target = 1
     output_dim = 2
-    lr = 0.1  # too low values return nan loss
+    lr = 0.001  # too low values return nan loss
     dropout_rate = 0
     weight_decay = 0
 
@@ -550,7 +555,7 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
             
     loss_terms = pd.DataFrame(loss_terms)
     return loss_terms, model
-
+# %%
 class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
@@ -577,7 +582,7 @@ class Experiment(submitit.helpers.Checkpointable):
             model.eval()
             with torch.no_grad():
                 
-                train_dataset = GraphData(feat_path, target_path,target_name, train_indices, augmentations = None)
+                train_dataset = GraphData(feat_path, target_path,target_name, train_indices, to_line_graph=True, threshold = threshold,augmentations = None, preprocess = False)
                 train_loader = graph_dataloader(train_dataset, batch_size=32, shuffle=False)
                 test_loader = graph_dataloader(test_dataset, batch_size=32, shuffle=False)
                 
@@ -614,18 +619,19 @@ class Experiment(submitit.helpers.Checkpointable):
     def save(self, path: Path):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
-
+# %%
 random_state = np.random.RandomState(seed=42)
 #dataset = GraphData(path_feat, path_target, "age")
 n_sub = 936
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
-experiments = 1
-path_feat = "./matrices"
+experiments = 20
+path_feat = "./matrices/schaefer400"
 path_target = "participants.csv"
 target_name = 'age'
 
+# %% ## Training
 if multi_gpu:
     log_folder = Path("log_folder")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
@@ -636,6 +642,7 @@ if multi_gpu:
         tasks_per_node=1,
         nodes=1,
         cpus_per_task=30
+#         mem_gb=187
     )
     # srun -n 1  --verbose -A hjt@v100 -c 10 -C v100-32g   --gres=gpu:1 --time 5  python
     experiment_jobs = []
@@ -668,8 +675,10 @@ else:
             job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, path_feat, path_target, target_name, THRESHOLD, random_state, device)
             experiment_results.append(job)
 
+# %%
 losses, predictions = zip(*experiment_results)
 
+# %%
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
     prediction_metrics |= prediction
@@ -678,9 +687,10 @@ prediction_metrics = [
     for k, v in prediction_metrics.items()
 ]
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
-prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_metrics["train size"] = (prediction_metrics["train ratio"] * 936 * (1 - test_ratio)).astype(int)
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_metrics.to_csv(f"results/prediction_metrics_graph_no_aug.csv", index=False)
+prediction_metrics.to_csv(f"results/prediction_metrics_graph_thresh{THRESHOLD}.csv", index=False)
 
 
+# %%
