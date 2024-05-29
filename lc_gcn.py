@@ -445,14 +445,14 @@ def cauchy(x, krnl_sigma):
     x = x - x.T
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
-def train(train_dataset, test_dataset, edge_index_path, model=None, device=device, kernel=cauchy, num_epochs=200, batch_size=32):
+def train(train_dataset, test_dataset, edge_index_path, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 1
     # the rest is arbitrary
     hidden_dim_feat = 64
    
     input_dim_target = 1
     output_dim = 2
-    lr = 0.001  # too low values return nan loss
+    lr = 0.1  # too low values return nan loss
     dropout_rate = 0
     weight_decay = 0
     train_loader = graph_dataloader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -505,7 +505,7 @@ def train(train_dataset, test_dataset, edge_index_path, model=None, device=devic
                 targets = targets.to(device, dtype = float)
                 data_list = []
                 for features in xfeat_list:
-                    features.to(device)
+                    features = features.to(device)
                     graph = create_graph(features, edge_index, len(features))
                     data_list.append(copy(graph))
 
@@ -548,9 +548,9 @@ def train(train_dataset, test_dataset, edge_index_path, model=None, device=devic
                 for xfeat_list, targets in test_loader:
                     data_list_test = []
                     targets = targets.to(device, dtype = float)
-                    print("targets test", targets.shape)
+                    # print("targets test", targets.shape)
                     for features in xfeat_list:
-                        features.to(device)
+                        features = features.to(device)
                         graph = create_graph(features, edge_index, len(features))
                         data_list_test.append(copy(graph))
 
@@ -560,9 +560,9 @@ def train(train_dataset, test_dataset, edge_index_path, model=None, device=devic
                     batch_edge_index = graph_batch.edge_index
                     
                     out_feat = model.transform_feat(batch_xfeat, batch_edge_index, batch)
-                    print("out_feat", out_feat.shape)
+                    # print("out_feat", out_feat.shape)
                     out_target_decoded = model.decode_target(out_feat)
-                    print("out_target_decoded", out_target_decoded.shape)
+                    # print("out_target_decoded", out_target_decoded.shape)
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
                 validation.append(mae_batch.item())
             scheduler.step(mae_batch)
@@ -628,8 +628,8 @@ class Experiment(submitit.helpers.Checkpointable):
                         targets = targets.to(device)
                         data_list = []
                         for features in xfeat_list:
-                            features.to(device)
-                            graph = create_graph(features.to(device), edge_index, len(features))
+                            features = features.to(device)
+                            graph = create_graph(features, edge_index, len(features))
                             data_list.append(copy(graph))
                         
                         graph_batch = tg.data.Batch.from_data_list(data_list)
