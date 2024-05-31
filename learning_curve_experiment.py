@@ -409,17 +409,21 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                 targets = targets.to(device)
                 out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
                 out_feat_squeezed = out_feat.squeeze()  
-                joint_embedding = nn.functional.mse_loss(out_feat_squeezed, out_target)
+                #joint_embedding = nn.functional.mse_loss(out_feat_squeezed, out_target)
+                #joint_embedding= -torch.dot(out_feat, out_target)
+                joint_embedding = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target, torch.ones(out_feat_squeezed.shape[0]))
+                print("joint_embedding", joint_embedding)
                 kernel_feature = criterion_pft(out_feat, targets)
-
+                print("kernel_feature", kernel_feature)
                 out_target_decoded = model.decode_target(out_target)
                 out_target = torch.split(out_target, [bsz]*n_views, dim=0)
                 out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
         
                 kernel_target = criterion_ptt(out_target, targets)
-                #joint_embedding = 1000 * nn.functional.cosine_embedding_loss(out_feat, out_target, cosine_target)
+                print("kernel_target", kernel_target)
+                #joint_embedding = 1000 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target, torch.ones(batch_size))
                 target_decoding = .1 * nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
-
+                print("target_decoding", target_decoding)
                 loss = kernel_feature + kernel_target + joint_embedding + target_decoding
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -614,4 +618,4 @@ prediction_metrics = [
 prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE"])
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 
-prediction_metrics.to_csv(f"results/prediction_metrics_GPC_MLP.csv", index=False)
+prediction_metrics.to_csv(f"results/prediction_metrics_GPC_MLP_new_je.csv", index=False)
