@@ -54,13 +54,17 @@ class MLP(nn.Module):
     ):
         super(MLP, self).__init__()
 
-        # Xavier initialization for feature MLP
-        self.feat_mlp =nn.Sequential(
+        self.feat_mlp = nn.Sequential(
             nn.BatchNorm1d(input_dim_feat),
             nn.Linear(input_dim_feat, hidden_dim_feat),
-            nn.ReLU(), # add more layers?
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim)
+            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim_feat, output_dim),
         )
         self.init_weights(self.feat_mlp)
 
