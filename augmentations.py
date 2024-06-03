@@ -3,6 +3,29 @@ from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.linalg import pinv, diagsvd
 from sklearn.utils.extmath import randomized_svd
 from itertools import combinations
+import torch.nn as nn
+import math
+
+
+class GPC(nn.Module):
+    def __init__(self, in_dim, out_dim, node):
+        super(GPC, self).__init__()
+        self.out_dim = out_dim
+        self.in_dim = in_dim
+        self.node = node
+        self.conv = nn.Conv2d(self.in_dim, self.out_dim, (1, self.node))
+        nn.init.normal_(self.conv.weight, std=math.sqrt(2/(self.node*self.in_dim+self.node*self.out_dim)))
+        
+    def forward(self, x):
+        x = x.view(1, 1, self.node, self.node)
+        batchsize = x.shape[0]
+        
+        x_c = self.conv(x)
+        x_C = x_c.expand(batchsize, self.out_dim, self.node, self.node)
+        x_R = x_C.permute(0,1,3,2)
+        x = x_C+x_R
+        
+        return x
 
 def threshMat(conn, thresh):
     perc = np.percentile(np.abs(conn), thresh, axis=1)  # Calculate the percentile along each matrix
@@ -83,5 +106,6 @@ augs = {
 aug_args = {
     "random_threshold_augmentation": {"threshold": 60,"bound" : 1},
     "flipping_threshold_augmentation": {"threshold": 60, "hemisphere_size": None},
-    "SVD_augmentation": {"n_components": 10, "n_iter": 5, "noise_factor": 0.01, "random_state":42}
+    "SVD_augmentation": {"n_components": 10, "n_iter": 5, "noise_factor": 0.01, "random_state":42},
+    "gpc" : {"in_dim": 1, "out_dim": 1, 'node' : 1000}
 }
