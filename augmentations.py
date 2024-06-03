@@ -4,9 +4,12 @@ from scipy.linalg import pinv, diagsvd
 from sklearn.utils.extmath import randomized_svd
 from itertools import combinations
 import torch.nn as nn
+import torch
+from copy import copy
 import math
 
 
+# +
 class GPC(nn.Module):
     def __init__(self, in_dim, out_dim, node):
         super(GPC, self).__init__()
@@ -26,6 +29,19 @@ class GPC(nn.Module):
         x = x_C+x_R
         
         return x
+
+
+# -
+
+def gpc(matrix, in_dim, out_dim, node):
+    gpc_mat = torch.from_numpy(copy(matrix)).float()
+    gpc = GPC(in_dim, out_dim, node)
+    gpc_mat = gpc(gpc_mat).squeeze()
+    gpc_mat = gpc_mat.detach().numpy()
+    mat_aug = matrix + gpc_mat
+    
+    return mat_aug
+
 
 def threshMat(conn, thresh):
     perc = np.percentile(np.abs(conn), thresh, axis=1)  # Calculate the percentile along each matrix
@@ -101,6 +117,7 @@ augs = {
     "random_threshold_augmentation": random_threshold_augmentation,
     "flipping_threshold_augmentation": flipping_threshold_augmentation,
     "SVD_augmentation": SVD_augmentation,
+    "gpc": gpc
 }
 
 aug_args = {
