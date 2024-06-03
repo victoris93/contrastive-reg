@@ -33,10 +33,11 @@ multi_gpu = True
 
 # %%
 # THRESHOLD = float(sys.argv[1])
+THRESHOLD = 0
 # AUGMENTATION = sys.argv[1]
 
 # %%
-AUGMENTATION = ['random_threshold_augmentation', 'flipping_threshold_augmentation']
+AUGMENTATION = 'gpc'
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -54,17 +55,12 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
 
         # Xavier initialization for feature MLP
-        self.feat_mlp = nn.Sequential(
+        self.feat_mlp =nn.Sequential(
             nn.BatchNorm1d(input_dim_feat),
             nn.Linear(input_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
+            nn.ReLU(), # add more layers?
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim),
+            nn.Linear(hidden_dim_feat, output_dim)
         )
         self.init_weights(self.feat_mlp)
 
@@ -111,7 +107,7 @@ class MLP(nn.Module):
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name, threshold=0):
+    def __init__(self, path_feat, path_targets, target_name, threshold=THRESHOLD):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
         self.target = torch.tensor(
@@ -122,9 +118,6 @@ class MatData(Dataset):
         )
         if threshold > 0:
             self.matrices = self.threshold(self.matrices, threshold)
-        # if threshold > 0: 
-        #     thrs = np.quantile(np.abs(self.matrices), q=threshold, axis=1, keepdims=True)
-        #     self.matrices = self.matrices * (np.abs(self.matrices) >= thrs)
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
 
@@ -443,7 +436,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, threshold = 0, augmentations = None, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -471,21 +464,21 @@ class Experiment(submitit.helpers.Checkpointable):
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
 
-            test_features= train_dataset.dataset.matrices[test_dataset.indices].numpy()
-            test_targets = train_dataset.dataset.target[test_dataset.indices].numpy()
+            test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
+            test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
 
             if augmentations is not None:
 #                 aug_params = {}
                 if not isinstance(augmentations, list):
                     augmentations = [augmentations]
                 n_augs = len(augmentations)
-                vect_train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
+                vect_train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 n_samples = len(train_dataset)
                 n_features = vect_train_features.shape[-1]
                 new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
                 new_train_features[:n_samples, 0, :] = vect_train_features
 
-                for i, aug in enumerate(AUGMENTATION):
+                for i, aug in enumerate(augmentations):
                     transform = augs[aug]
                     transform_args = aug_args[aug]
 #                     aug_params[aug] = transform_args # to save later in the metrics df
@@ -527,7 +520,7 @@ class Experiment(submitit.helpers.Checkpointable):
         if path:
             self.save(path)
         
-        return self.results, 
+        return self.results
 
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
@@ -538,7 +531,7 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 # %%
 random_state = np.random.RandomState(seed=42)
-dataset = MatData("matrices.npy", "participants.csv", "age", threshold=0)
+dataset = MatData("matrices.npy", "participants.csv", "age", threshold=THRESHOLD)
 n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
@@ -607,4 +600,4 @@ prediction_metrics = pd.DataFrame(prediction_metrics, columns=["train ratio", "e
 prediction_metrics["train size"] = (prediction_metrics["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_metrics.to_csv(f"results/prediction_metrics_{AUGMENTATION}.csv", index=False)
+prediction_metrics.to_csv(f"results/prediction_metrics_GPC_aug.csv", index=False)
