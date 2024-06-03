@@ -25,7 +25,7 @@ from augmentations import augs
 
 
 torch.cuda.empty_cache()
-multi_gpu = False
+multi_gpu = True
 # %%
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
 # -
@@ -84,7 +84,7 @@ class GPC_MLP(nn.Module):
         self.gpc = GPC(1, 1)
 
         self.feat_mlp =nn.Sequential(
-            nn.BatchNorm1d(input_dim_target),
+            nn.BatchNorm1d(input_dim_feat),
             nn.Linear(input_dim_feat, hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
@@ -116,9 +116,15 @@ class GPC_MLP(nn.Module):
             nn.init.constant_(m.bias, 0.0)
 
     def transform_feat(self, x):
+        print("X: ", x.shape)
         gpc_features = self.gpc(x)
-        gpc_features = torch.from_numpy(sym_matrix_to_vec(gpc_features.detach().numpy(), discard_diagonal=True)).float().to(device)
-        features = self.feat_mlp(gpc_features)
+        print("gpc_features: ", gpc_features.shape)
+        gpc_features = torch.from_numpy(sym_matrix_to_vec(gpc_features.detach().cpu().numpy(), discard_diagonal=True)).float().to(device)
+        x_vect = torch.from_numpy(sym_matrix_to_vec(x.detach().cpu().numpy(), discard_diagonal=True)).float().to(device)
+        feat = gpc_features + x_vect
+        print("feat: ", feat.shape)
+        features = self.feat_mlp(feat.squeeze(1))
+        print("features: ", features.shape)
         features = nn.functional.normalize(features, p=2, dim=1)
         return features
     
@@ -394,7 +400,6 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
-                
                 bsz = targets.shape[0]
                 n_views = features.shape[1]
                 n_feat = features.shape[-1]
@@ -402,18 +407,15 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                 optimizer.zero_grad()
                 features = features.to(device)
                 targets = targets.to(device)
-                out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
-                
+                out_feat, out_target = model(features, targets)
                 joint_embedding = nn.functional.mse_loss(out_feat, out_target)
-                kernel_feature = criterion_pft(out_feat, targets)
+                kernel_feature = criterion_pft(out_feat.unsqueeze(1), targets.unsqueeze(1))
 
                 out_target_decoded = model.decode_target(out_target)
-                out_target = torch.split(out_target, [bsz]*n_views, dim=0)
-                out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
-        
-                kernel_target = criterion_ptt(out_target, targets)
+
+                kernel_target = criterion_ptt(out_target.unsqueeze(1), targets.unsqueeze(1))
                 #joint_embedding = 1000 * nn.functional.cosine_embedding_loss(out_feat, out_target, cosine_target)
-                target_decoding = .1 * nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
+                target_decoding = .1 * nn.functional.mse_loss(targets, out_target_decoded)
 
                 loss = kernel_feature + kernel_target + joint_embedding + target_decoding
                 loss.backward()
@@ -489,8 +491,8 @@ class Experiment(submitit.helpers.Checkpointable):
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
 
-            test_features= train_dataset.dataset.matrices[test_dataset.indices].numpy()
-            test_targets = train_dataset.dataset.target[test_dataset.indices].numpy()
+            test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
+            test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
 
             if AUGMENTATION is not None:
                 transform = augs[AUGMENTATION]
@@ -540,7 +542,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def save(self, path: Path):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
-#%%
+# %%
 random_state = np.random.RandomState(seed=42)
 dataset = MatData("matrices.npy", "participants.csv", "age", threshold=THRESHOLD)
 n_sub = len(dataset)
@@ -548,7 +550,7 @@ test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
 experiments = 20
-#%%
+# %%
 if multi_gpu:
     log_folder = Path("log_folder")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
