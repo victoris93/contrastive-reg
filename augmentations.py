@@ -140,12 +140,14 @@ augs = {
     "random_threshold_augmentation": random_threshold_augmentation,
     "flipping_threshold_augmentation": flipping_threshold_augmentation,
     "SVD_augmentation": SVD_augmentation,
-    "gpc": gpc
+    "gpc": gpc,
+    "isolate_network": isolate_network
 }
 
 aug_args = {
     "random_threshold_augmentation": {"threshold": 60,"bound" : 1},
     "flipping_threshold_augmentation": {"threshold": 60, "hemisphere_size": None},
     "SVD_augmentation": {"n_components": 10, "n_iter": 5, "noise_factor": 0.01, "random_state":42},
-    "gpc" : {"in_dim": 1, "out_dim": 1, 'node' : 1000}
+    "gpc" : {"in_dim": 1, "out_dim": 1, 'node' : 1000},
+    "isolate_network" : {"string" : "Default"}
 }
