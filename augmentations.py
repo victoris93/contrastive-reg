@@ -122,7 +122,8 @@ def extract_label_idx(substring):
 
     return label_indices
 
-
+#if mode = extract, extracts a network a set other values to 0, else if mode = eliminate, 
+#sets the values of the chosen network to 0 and keeps the other values
 def isolate_network(matrix, string, mode = "extract"):
     label_indices = extract_label_idx(string)
     mask = np.zeros_like(matrix, dtype=bool)
