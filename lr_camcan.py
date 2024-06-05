@@ -413,13 +413,13 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                 out_feat, out_target_1, out_target_2 = model(features, torch.cat(n_views*[target_1], dim=0), torch.cat(n_views*[target_2], dim=0))
                 out_feat_squeezed = out_feat.squeeze()
 
-                joint_embedding_1 = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target_1, torch.ones(out_feat_squeezed.shape[0]))
-                joint_embedding_2 = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target_2, torch.ones(out_feat_squeezed.shape[0]))
-                joint_embedding_3 = 100 * nn.functional.cosine_embedding_loss(out_target_1, out_target_2, torch.ones(out_target_1.shape[0]))
+                joint_embedding_1 = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target_1, torch.ones(out_feat_squeezed.shape[0]).to(device))
+                joint_embedding_2 = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target_2, torch.ones(out_feat_squeezed.shape[0]).to(device))
+                joint_embedding_3 = 100 * nn.functional.cosine_embedding_loss(out_target_1, out_target_2, torch.ones(out_target_1.shape[0]).to(device))
                 
                 out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
                 out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
-                
+                out_feat.to(device)
                 kernel_feature_1 = criterion_pft(out_feat, target_1)
                 kernel_feature_2 = criterion_pft(out_feat, target_2)
 
@@ -676,27 +676,28 @@ losses, predictions_1, predictions_2 = zip(*experiment_results)
 # %%
 prediction_metrics_1 = predictions_1[0]
 for prediction in predictions_1[1:]:
-    prediction_metrics_1 |= prediction
+    prediction_metrics_1.update(prediction)
+prediction_metrics_1 = [
+    k + ((np.abs(v[0] - v[1]) / np.abs(v[0])).mean(),)
+    for k, v in prediction_metrics_1.items()
+]
 
 prediction_metrics_2 = predictions_2[0]
 for prediction in predictions_2[1:]:
-    prediction_metrics_2 |= prediction
-
-prediction_metrics_combined = {}
-for key in prediction_metrics_1.keys():
-    prediction_metrics_combined[key] = (
-        np.abs(prediction_metrics_1[key][0] - prediction_metrics_1[key][1]).mean(),
-        np.abs(prediction_metrics_2[key][0] - prediction_metrics_2[key][1]).mean()
-    )
-
-prediction_metrics = [
-    (k, v[0], v[1], (v[0] + v[1]))  # Calculate mean MAE
-    for k, v in prediction_metrics_combined.items()
+    prediction_metrics_2.update(prediction)
+prediction_metrics_2 = [
+    k + ((np.abs(v[0] - v[1]) / np.abs(v[0])).mean(),)
+    for k, v in prediction_metrics_2.items()
 ]
 
-prediction_metrics_df = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAE_1", "MAE_2"])
-prediction_metrics_df["total_MAE"] = prediction_metrics_df[["MAE_1", "MAE_2"]].sum(axis=1)
-prediction_metrics_df["train size"] = (prediction_metrics_df["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_metrics_1 = pd.DataFrame(prediction_metrics_1, columns=["train ratio", "experiment", "dataset", "MAE_1"])
+prediction_metrics_2 = pd.DataFrame(prediction_metrics_2, columns=["train ratio", "experiment", "dataset", "MAE_2"])
 
-# Save to CSV
-prediction_metrics_df.to_csv(f"results/prediction_metrics_2 targets.csv", index=False)
+prediction_metrics_1["train size"] = (prediction_metrics_1["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_metrics_2["train size"] = (prediction_metrics_2["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+
+# if AUGMENTATION is not None:
+#     prediction_metrics["aug_args"] = str(aug_args)
+prediction_metrics_1.to_csv(f"results/prediction_metrics_mape_1.csv", index=False)
+prediction_metrics_2.to_csv(f"results/prediction_metrics_mape_2.csv", index=False)
+# %%
