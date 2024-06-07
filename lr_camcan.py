@@ -23,6 +23,8 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 from augmentations import augs, aug_args
 import glob, os, shutil
+from nilearn.datasets import fetch_atlas_schaefer_2018
+
 
 torch.cuda.empty_cache()
 multi_gpu = True
@@ -38,6 +40,8 @@ THRESHOLD = 0
 
 # %%
 AUGMENTATION = None
+
+REGION_LABELS = b'7Networks_RH_Vis_2'
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -140,7 +144,7 @@ class MLP(nn.Module):
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD):
+    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD, region_label = REGION_LABELS):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
         self.target_1 = torch.tensor(
@@ -153,10 +157,25 @@ class MatData(Dataset):
                 pd.read_csv(path_targets)[target_name_2].values, axis=1
             ),
             dtype=torch.float32)
+        
         if threshold > 0:
             self.matrices = self.threshold(self.matrices, threshold)
-        self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+            self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
+        
+        if region_label is not None :
+            self.matrics = self.deactivate_regions(self.matrices, region_label)
+            self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        gc.collect()
+        
+    def deactivate_regions(self, matrix, region_label):
+        atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
+        atlas_labels = atlas_data.labels
+        parcel_index = np.where(atlas_labels == region_label)[0][0]
+        matrix[:, parcel_index, :] = 0
+        matrix[:, :, parcel_index] = 0
+        return matrix
+        
 
     def threshold(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
@@ -674,30 +693,56 @@ else:
 losses, predictions_1, predictions_2 = zip(*experiment_results)
 
 # %%
+def calculate_variance_explained(predicted, actual):
+    return 100 * (1 - np.var(predicted - actual) / np.var(actual))
+
+
+# %%
 prediction_metrics_1 = predictions_1[0]
 for prediction in predictions_1[1:]:
     prediction_metrics_1.update(prediction)
-prediction_metrics_1 = [
+    
+prediction_mape_1 = [
     k + ((np.abs(v[0] - v[1]) / np.abs(v[0])).mean(),)
+    for k, v in prediction_metrics_1.items()
+]
+prediction_var_1 = [
+    k + (calculate_variance_explained(v[1], v[0]),)
     for k, v in prediction_metrics_1.items()
 ]
 
 prediction_metrics_2 = predictions_2[0]
 for prediction in predictions_2[1:]:
     prediction_metrics_2.update(prediction)
-prediction_metrics_2 = [
+    
+prediction_mape_2 = [
     k + ((np.abs(v[0] - v[1]) / np.abs(v[0])).mean(),)
     for k, v in prediction_metrics_2.items()
 ]
 
-prediction_metrics_1 = pd.DataFrame(prediction_metrics_1, columns=["train ratio", "experiment", "dataset", "MAE_1"])
-prediction_metrics_2 = pd.DataFrame(prediction_metrics_2, columns=["train ratio", "experiment", "dataset", "MAE_2"])
+prediction_var_2 = [
+    k + (calculate_variance_explained(v[1], v[0]),)
+    for k, v in prediction_metrics_2.items()
+]
 
-prediction_metrics_1["train size"] = (prediction_metrics_1["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
-prediction_metrics_2["train size"] = (prediction_metrics_2["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+
+prediction_mape_1 = pd.DataFrame(prediction_mape_1, columns=["train ratio", "experiment", "dataset", "MAPE_1"])
+prediction_var_1 = pd.DataFrame(prediction_var_1, columns=["train ratio", "experiment", "dataset", "var_explained_1"])
+prediction_mape_2 = pd.DataFrame(prediction_mape_2, columns=["train ratio", "experiment", "dataset", "MAPE_2"])
+prediction_var_2 = pd.DataFrame(prediction_var_1, columns=["train ratio", "experiment", "dataset", "var_explained_2"])
+
+prediction_mape_1["train size"] = (prediction_mape_1["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_var_1["train size"] = (prediction_var_1["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+
+prediction_mape_2["train size"] = (prediction_mape_2["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
+prediction_var_2["train size"] = (prediction_var_2["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
 
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_metrics_1.to_csv(f"results/prediction_metrics_mape_1.csv", index=False)
-prediction_metrics_2.to_csv(f"results/prediction_metrics_mape_2.csv", index=False)
+prediction_mape_1.to_csv(f"results/prediction_mape_1_without_RH_Vis_2.csv", index=False)
+prediction_var_1.to_csv(f"results/prediction_var_1_without_RH_Vis_2.csv", index=False)
+
+prediction_mape_2.to_csv(f"results/prediction_mape_2_without_RH_Vis_2.csv", index=False)
+prediction_var_2.to_csv(f"results/prediction_var_2_without_RH_Vis_2.csv", index=False)
+
 # %%
