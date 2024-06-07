@@ -41,7 +41,7 @@ THRESHOLD = 0
 # %%
 AUGMENTATION = None
 
-REGION_LABELS = b'7Networks_RH_Vis_2'
+REGION_LABELS = [b'7Networks_RH_Vis_2',  b'7Networks_LH_DorsAttn_Post_1']
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -164,16 +164,17 @@ class MatData(Dataset):
         gc.collect()
         
         if region_label is not None :
-            self.matrics = self.deactivate_regions(self.matrices, region_label)
+            self.matrices = self.deactivate_regions(self.matrices, region_label)
             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
         
     def deactivate_regions(self, matrix, region_label):
         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
         atlas_labels = atlas_data.labels
-        parcel_index = np.where(atlas_labels == region_label)[0][0]
-        matrix[:, parcel_index, :] = 0
-        matrix[:, :, parcel_index] = 0
+        for label in region_label : 
+            parcel_index = np.where(atlas_labels == label)[0][0]
+            matrix[:, parcel_index, :] = 0
+            matrix[:, :, parcel_index] = 0
         return matrix
         
 
@@ -739,10 +740,10 @@ prediction_var_2["train size"] = (prediction_var_2["train ratio"] * len(dataset)
 
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_mape_1.to_csv(f"results/prediction_mape_1_without_RH_Vis_2.csv", index=False)
-prediction_var_1.to_csv(f"results/prediction_var_1_without_RH_Vis_2.csv", index=False)
+prediction_mape_1.to_csv(f"results/prediction_mape_1_without_RH_Vis_2_2_2.csv", index=False)
+prediction_var_1.to_csv(f"results/prediction_var_1_without_RH_Vis_2_2_2.csv", index=False)
 
-prediction_mape_2.to_csv(f"results/prediction_mape_2_without_RH_Vis_2.csv", index=False)
-prediction_var_2.to_csv(f"results/prediction_var_2_without_RH_Vis_2.csv", index=False)
+prediction_mape_2.to_csv(f"results/prediction_mape_2_without_RH_Vis_2_2_2.csv", index=False)
+prediction_var_2.to_csv(f"results/prediction_var_2_without_RH_Vis_2_2_2.csv", index=False)
 
 # %%
