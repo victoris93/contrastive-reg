@@ -24,6 +24,7 @@ from tqdm.auto import tqdm
 from augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
+import random
 
 
 torch.cuda.empty_cache()
@@ -41,9 +42,9 @@ THRESHOLD = 0
 # %%
 AUGMENTATION = None
 
-REGION_LABELS_TO_DEACTIVATE = [b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1',b'7Networks_RH_Vis_3',b'7Networks_LH_Vis_2']
+REGION_LABELS_TO_DEACTIVATE = None#[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1',b'7Networks_RH_Vis_3',b'7Networks_LH_Vis_2']
 REGION_LABELS_NOT_TO_DEACTIVATE = None#[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1']
-
+SELECTED_REGIONS = [b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1', b'7Networks_RH_Vis_6', b'7Networks_RH_Vis_1', b'7Networks_RH_Vis_3',b'7Networks_LH_Vis_2', b'7Networks_LH_Vis_4', b'7Networks_LH_Vis_7']
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -145,7 +146,7 @@ class MLP(nn.Module):
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD, region_label_to_deactivate = REGION_LABELS_TO_DEACTIVATE, region_label_not_to_deactivate = REGION_LABELS_NOT_TO_DEACTIVATE):
+    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD, region_label_to_deactivate = REGION_LABELS_TO_DEACTIVATE, region_label_not_to_deactivate = REGION_LABELS_NOT_TO_DEACTIVATE, selected_regions = SELECTED_REGIONS):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
         self.target_1 = torch.tensor(
@@ -171,6 +172,11 @@ class MatData(Dataset):
         
         if region_label_not_to_deactivate is not None : 
             self.matrices = self.deactivate_not_selected_regions(self.matrices, region_label_not_to_deactivate)
+            self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        gc.collect()
+        
+        if selected_regions is not None : 
+            self.matrices = self.replace_selected_regions(self.matrices, selected_regions)
             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
             
@@ -201,6 +207,29 @@ class MatData(Dataset):
             deactivated_matrix[:, :, idx] = matrix[:, :, idx]
 
         return deactivated_matrix
+    
+    def replace_selected_regions(self, matrix, selected_regions):
+        atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
+        atlas_labels = atlas_data.labels
+
+        # Get the indices of the selected regions
+        indices_to_replace = [np.where(atlas_labels == label)[0][0] for label in selected_regions]
+
+        # Create a copy of the matrix to avoid modifying the original one
+        modified_matrix = np.copy(matrix)
+
+        num_samples = matrix.shape[0]
+        
+        for sample_idx in range(num_samples):
+            # Randomly select another sample index
+            random_sample_idx = random.choice([i for i in range(num_samples) if i != sample_idx])
+
+            for idx in indices_to_replace:
+                # Replace the values in the selected regions
+                modified_matrix[sample_idx, idx, :] = matrix[random_sample_idx, idx, :]
+                modified_matrix[sample_idx, :, idx] = matrix[random_sample_idx, :, idx]
+
+        return modified_matrix
 
     def threshold(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
@@ -764,8 +793,8 @@ prediction_var_2["train size"] = (prediction_var_2["train ratio"] * len(dataset)
 
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_mape_1.to_csv(f"results/prediction_mape_1_r_5_test_2.csv", index=False)
-prediction_var_1.to_csv(f"results/prediction_var_1_r_5_test_2.csv", index=False)
+prediction_mape_1.to_csv(f"results/prediction_mape_1_replacing_ffa_r_8.csv", index=False)
+prediction_var_1.to_csv(f"results/prediction_var_1_replacing_ffa_r_8.csv", index=False)
 
-prediction_mape_2.to_csv(f"results/prediction_mape_2_r_5_test_2.csv", index=False)
-prediction_var_2.to_csv(f"results/prediction_var_2_r_5_test_2.csv", index=False)
+prediction_mape_2.to_csv(f"results/prediction_mape_2_replacing_ffa_r_8.csv", index=False)
+prediction_var_2.to_csv(f"results/prediction_var_2_replacing_ffa_r_8.csv", index=False)
