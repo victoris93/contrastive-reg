@@ -41,7 +41,8 @@ THRESHOLD = 0
 # %%
 AUGMENTATION = None
 
-REGION_LABELS = [b'7Networks_RH_Vis_2',  b'7Networks_LH_DorsAttn_Post_1']
+REGION_LABELS_TO_DEACTIVATE = [b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1',b'7Networks_RH_Vis_3',b'7Networks_LH_Vis_2']
+REGION_LABELS_NOT_TO_DEACTIVATE = None#[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1']
 
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -127,7 +128,7 @@ class MLP(nn.Module):
         target_2 = self.target_2_mlp(y)
         target_2 = nn.functional.normalize(target_2, p=2, dim=1)
         return target_2
- 
+
     def decode_targets_1(self, y_embedding):
         decoded_1 = self.decode_target_1(y_embedding)
         return decoded_1
@@ -137,14 +138,14 @@ class MLP(nn.Module):
         return decoded_2
 
     def forward(self, x, y, z):
-       x_embedding = self.transform_feat(x)
-       y_embedding = self.transform_target_1(y)
-       z_embedding = self.transform_target_2(z)
-       return x_embedding, y_embedding, z_embedding
+        x_embedding = self.transform_feat(x)
+        y_embedding = self.transform_target_1(y)
+        z_embedding = self.transform_target_2(z)
+        return x_embedding, y_embedding, z_embedding
 
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD, region_label = REGION_LABELS):
+    def __init__(self, path_feat, path_targets, target_name_1, target_name_2, threshold=THRESHOLD, region_label_to_deactivate = REGION_LABELS_TO_DEACTIVATE, region_label_not_to_deactivate = REGION_LABELS_NOT_TO_DEACTIVATE):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
         self.target_1 = torch.tensor(
@@ -163,20 +164,43 @@ class MatData(Dataset):
             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
         
-        if region_label is not None :
-            self.matrices = self.deactivate_regions(self.matrices, region_label)
+        if region_label_to_deactivate is not None :
+            self.matrices = self.deactivate_selected_regions(self.matrices, region_label_to_deactivate)
             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         gc.collect()
         
-    def deactivate_regions(self, matrix, region_label):
+        if region_label_not_to_deactivate is not None : 
+            self.matrices = self.deactivate_not_selected_regions(self.matrices, region_label_not_to_deactivate)
+            self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        gc.collect()
+            
+        #self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        
+    def deactivate_selected_regions(self, matrix, region_label_to_deactivate):
         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
         atlas_labels = atlas_data.labels
-        for label in region_label : 
+        for label in region_label_to_deactivate : 
             parcel_index = np.where(atlas_labels == label)[0][0]
             matrix[:, parcel_index, :] = 0
             matrix[:, :, parcel_index] = 0
         return matrix
         
+    def deactivate_not_selected_regions(self, matrix, region_label_not_to_deactivate):
+        atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
+        atlas_labels = atlas_data.labels
+
+        # Get the indices of the regions to keep
+        indices_to_keep = [np.where(atlas_labels == label)[0][0] for label in region_label_not_to_deactivate]
+
+        # Create a matrix of zeros with the same shape as the input matrix
+        deactivated_matrix = np.zeros_like(matrix)
+
+        # Fill the deactivated matrix with values from the rows and columns corresponding to the indices to keep
+        for idx in indices_to_keep:
+            deactivated_matrix[:, idx, :] = matrix[:, idx, :]
+            deactivated_matrix[:, :, idx] = matrix[:, :, idx]
+
+        return deactivated_matrix
 
     def threshold(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
@@ -740,10 +764,8 @@ prediction_var_2["train size"] = (prediction_var_2["train ratio"] * len(dataset)
 
 # if AUGMENTATION is not None:
 #     prediction_metrics["aug_args"] = str(aug_args)
-prediction_mape_1.to_csv(f"results/prediction_mape_1_without_RH_Vis_2_2_2.csv", index=False)
-prediction_var_1.to_csv(f"results/prediction_var_1_without_RH_Vis_2_2_2.csv", index=False)
+prediction_mape_1.to_csv(f"results/prediction_mape_1_r_5_test_2.csv", index=False)
+prediction_var_1.to_csv(f"results/prediction_var_1_r_5_test_2.csv", index=False)
 
-prediction_mape_2.to_csv(f"results/prediction_mape_2_without_RH_Vis_2_2_2.csv", index=False)
-prediction_var_2.to_csv(f"results/prediction_var_2_without_RH_Vis_2_2_2.csv", index=False)
-
-# %%
+prediction_mape_2.to_csv(f"results/prediction_mape_2_r_5_test_2.csv", index=False)
+prediction_var_2.to_csv(f"results/prediction_var_2_r_5_test_2.csv", index=False)
