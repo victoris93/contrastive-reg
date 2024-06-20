@@ -708,7 +708,6 @@ for k, v in prediction_metrics.items():
         )
 
 df = pd.DataFrame(prediction_mape_by_element)
-df = df.groupby(['train_ratio', 'experiment', 'dataset']).agg({'mape': 'mean'}).reset_index()
 
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
 df.columns = ['train_ratio', 'experiment', 'dataset', 'BentonFaces_total',
