@@ -695,22 +695,18 @@ prediction_mape_by_element = []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
     
-    # Calculate MAPE for each element separately
     mape_by_element = np.abs(true_targets - predicted_targets) / np.abs(true_targets)
     
-    # Append each element's MAPE along with other metadata (train_ratio, experiment, dataset)
     for i, mape in enumerate(mape_by_element):
         prediction_mape_by_element.append(
             {
                 'train_ratio': k[0],
                 'experiment': k[1],
                 'dataset': k[2],
-                #'element_index': indices[i],  # Assuming indices represent the element index
                 'mape': mape
             }
         )
 
-# Create DataFrame from the list of dictionaries
 df = pd.DataFrame(prediction_mape_by_element)
 df = df.groupby(['train_ratio', 'experiment', 'dataset']).agg({'mape': 'mean'}).reset_index()
 
