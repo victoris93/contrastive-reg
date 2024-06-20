@@ -722,7 +722,7 @@ for label in atlas_labels:
     prediction_metrics_df = pd.DataFrame(prediction_metrics, columns=["train ratio", "experiment", "dataset", "MAPE", "Variance Explained"])
     prediction_metrics_df["train size"] = (prediction_metrics_df["train ratio"] * len(dataset) * (1 - test_ratio)).astype(int)
     prediction_metrics_df.to_csv(f"results/tests_ffa/prediction_metrics_{label}.csv", index=True) """
-    
+
     # %%
     losses, predictions = zip(*experiment_results)
 
