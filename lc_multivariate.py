@@ -636,7 +636,7 @@ n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
-experiments = 100
+experiments = 20
 
 # %% ## Training
 if multi_gpu:
@@ -712,6 +712,8 @@ for k, v in prediction_metrics.items():
 
 # Create DataFrame from the list of dictionaries
 df = pd.DataFrame(prediction_mape_by_element)
+df = df.groupby(['train_ratio', 'experiment', 'dataset']).agg({'mape': 'mean'}).reset_index()
+
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
 df.columns = ['train_ratio', 'experiment', 'dataset', 'BentonFaces_total',
 'CardioMeasures_pulse_mean',
@@ -736,6 +738,8 @@ df.columns = ['train_ratio', 'experiment', 'dataset', 'BentonFaces_total',
 'VSTMcolour_K_precision',
 'VSTMcolour_K_doubt',
 'VSTMcolour_MSE']
-print(df)
+df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
 
-#df.to_csv(f"results/multivariate/test_3.csv", index=True)
+
+
+df.to_csv(f"results/multivariate/test_4.csv", index=True)
