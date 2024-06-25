@@ -68,22 +68,37 @@ class MLP(nn.Module):
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_feat, output_dim),
         )
         self.init_weights(self.feat_mlp)
 
         # Xavier initialization for target MLP
         self.target_mlp = nn.Sequential(
-            nn.BatchNorm1d(input_dim_target),
+            #nn.BatchNorm1d(input_dim_target),
             nn.Linear(input_dim_target, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
             nn.Linear(hidden_dim_feat, output_dim)
         )
         self.init_weights(self.target_mlp)
 
         self.decode_target = nn.Sequential(
             nn.Linear(output_dim, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
+            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Linear(hidden_dim_feat, input_dim_target)
@@ -118,7 +133,12 @@ class MatData(Dataset):
     def __init__(self, path_feat, path_targets, threshold=THRESHOLD, selected_regions = SELECTED_REGIONS, function_to_use=FUNCTION):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
-        self.target = torch.tensor(pd.read_csv(path_targets).drop(columns=["Subject", "Unnamed: 0"]).to_numpy(), dtype=torch.float32)
+        selected_columns = ["BentonFaces_total", "Cattell_total"]
+        df = pd.read_csv(path_targets, usecols=selected_columns)
+
+# Convert selected columns to a PyTorch tensor
+        self.target = torch.tensor(df.to_numpy(), dtype=torch.float32)       
+        #self.target = torch.tensor(pd.read_csv(path_targets)["BentonFaces_total","Cattell_total"].to_numpy(), dtype=torch.float32)
         if threshold > 0:
             self.matrices = self.threshold(self.matrices, threshold)
             #self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
@@ -399,12 +419,12 @@ def multivariate_cauchy(x, krnl_sigma):
 
 # %%
 
-def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
+def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 4950
     # the rest is arbitrary
     hidden_dim_feat = 1000
-    input_dim_target = 23
-    output_dim = 2
+    input_dim_target = 2
+    output_dim = 3
     
 
     num_epochs = 100
@@ -418,6 +438,8 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
+    mean= torch.tensor(mean).to(device)
+    std = torch.tensor(std).to(device)
     if model is None:
         model = MLP(
             input_dim_feat,
@@ -428,17 +450,17 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
         ).to(device)
 
     criterion_pft = KernelizedSupCon(
-        method="expw", temperature=0.03, base_temperature=0.03, kernel=kernel, krnl_sigma=1
+        method="expw", temperature=0.001, base_temperature=0.001, kernel=kernel, krnl_sigma=1/50
     )
     criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=0.03, base_temperature=0.03, kernel=kernel, krnl_sigma=1
+        method="expw", temperature=0.001, base_temperature=0.001, kernel=kernel, krnl_sigma=1/50
     )
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1)
 
     loss_terms = []
     validation = []
-
+    
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -456,25 +478,32 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                 features = features.view(bsz * n_views, n_feat)
                 features = features.to(device)
                 targets = targets.to(device)
+                target_destandardized = targets*std+mean
                 out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
-                
-                joint_embedding = nn.functional.mse_loss(out_feat, out_target)
+                #print("out_feat", out_feat)
+                #print("out target", out_target)
+                out_feat_squeezed = out_feat.squeeze()
+                #joint_embedding = 10*nn.functional.mse_loss(out_feat, out_target)
+                joint_embedding = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target, torch.ones(out_feat_squeezed.shape[0]).to(device))
                 
                 out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
                 out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
                 kernel_feature = criterion_pft(out_feat, targets)
                 out_target_decoded = model.decode_target(out_target)
+                out_target_decoded_destandardized = out_target_decoded*std+mean
+                #print("out target decoded",out_target_decoded)
                 #cosine_target = torch.ones(len(out_target), device=device)                
                 out_target = torch.split(out_target, [bsz]*n_views, dim=0)
                 out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
         
                 kernel_target = criterion_ptt(out_target, targets)
+                
                 #joint_embedding = 1000 * nn.functional.cosine_embedding_loss(out_feat, out_target, cosine_target)
-                target_decoding = .1*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
+                target_decoding = (.1/input_dim_target)*nn.functional.mse_loss(torch.cat(n_views*[target_destandardized], dim=0), out_target_decoded_destandardized)
 
                 loss = kernel_feature + kernel_target + joint_embedding + target_decoding
                 loss.backward()
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
@@ -497,10 +526,14 @@ def train(train_dataset, test_dataset, model=None, device=device, kernel=cauchy,
                         n_views = features.shape[1]
                         features = features.view(bsz * n_views, n_feat)
                     features, targets = features.to(device), targets.to(device)
+                    targets = targets*std - mean
                     
                     out_feat = model.transform_feat(features)
-                    out_target_decoded = model.decode_target(out_feat)
                     
+                    out_target_decoded = model.decode_target(out_feat)
+                    out_target_decoded = out_target_decoded*std-mean
+                    
+
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
                 validation.append(mae_batch.item())
             scheduler.step(mae_batch)
@@ -523,11 +556,12 @@ def standardize(data, mean=None, std=None, epsilon = 1e-4):
         mean = np.mean(data, axis=0)
     if std is None:
         std = np.std(data, axis=0)+ epsilon
-    return (data - mean) / std, mean, std
+    return (data - mean)/std, mean, std
 # %%
 class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
+        self.embeddings = None 
 
     def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=None, device=None, path: Path = None):
         if self.results is None:
@@ -549,6 +583,8 @@ class Experiment(submitit.helpers.Checkpointable):
             # print("Data loaded", flush=True)
             predictions = {}
             losses = []
+            self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
+
             experiment_indices = random_state.choice(indices, experiment_size, replace=False)
             train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
             train_dataset = Subset(dataset, train_indices)
@@ -556,7 +592,7 @@ class Experiment(submitit.helpers.Checkpointable):
             ### Augmentation
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-            train_targets, mean, std = standardize(train_targets)
+            train_targets, mean, std= standardize(train_targets)
             
             
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
@@ -595,8 +631,10 @@ class Experiment(submitit.helpers.Checkpointable):
             test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset, device=device)
+            loss_terms, model = train(train_dataset, test_dataset,mean, std, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
+            mean = torch.tensor(mean).to(device)
+            std  = torch.tensor(std).to(device)
             model.eval()
             with torch.no_grad():
                 train_dataset = Subset(dataset, train_indices)
@@ -609,11 +647,20 @@ class Experiment(submitit.helpers.Checkpointable):
                     X, y = zip(*d)
                     X = torch.stack(X).to(device)
                     y = torch.stack(y).to(device)
-                    y_pred = model.decode_target(model.transform_feat(X))
+                    X_embedded = model.transform_feat(X)
+                    y_embedded = model.transform_targets(y)
+                    y = y*std + mean
+                    y_pred = model.decode_target(X_embedded)*std + mean
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
-                    #print("predictions", predictions.shape)
-            self.results = (losses, predictions)
-
+                    for i, idx in enumerate(d_indices):
+                        self.embeddings[label].append({
+                            'index': idx,
+                            'target_embedded': y_embedded[i].cpu().numpy(),
+                            'feature_embedded': X_embedded[i].cpu().numpy()
+                        })
+                    
+            self.results = (losses, predictions, self.embeddings)
+            
         if path:
             self.save(path)
         
@@ -626,6 +673,7 @@ class Experiment(submitit.helpers.Checkpointable):
     def save(self, path: Path):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
+
 # %%
 path_feat = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
 path_target = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
@@ -677,6 +725,7 @@ if multi_gpu:
     
 else:
     experiment_results = []
+    
     for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
         train_size = int(n_sub * (1 - test_ratio) * train_ratio)
         experiment_size = test_size + train_size
@@ -684,9 +733,11 @@ else:
             run_experiment = Experiment()
             job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
             experiment_results.append(job)
+            
 
 # %%
-losses, predictions = zip(*experiment_results)
+losses, predictions, embeddings = zip(*experiment_results)
+
 #print("predicitons", predictions)
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
@@ -695,7 +746,7 @@ prediction_mape_by_element = []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
     
-    mape_by_element = np.abs(true_targets - predicted_targets) / np.abs(true_targets)
+    mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
     
     for i, mape in enumerate(mape_by_element):
         prediction_mape_by_element.append(
@@ -708,33 +759,62 @@ for k, v in prediction_metrics.items():
         )
 
 df = pd.DataFrame(prediction_mape_by_element)
-
+#embeddings = pd.DataFrame(embeddings, columns = ["X", "y"])
+#loss  = pd.DataFrame(losses)
+#loss.to_csv(f"results/multivariate/loss_test_1_lr_000001.csv", index=True)
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
 df.columns = ['train_ratio', 'experiment', 'dataset', 'BentonFaces_total',
-'CardioMeasures_pulse_mean',
-'CardioMeasures_bp_sys_mean',
-'CardioMeasures_bp_dia_mean',
-'Cattell_total',
-'EkmanEmHex_pca1',
-'EkmanEmHex_pca1_expv',
-'FamousFaces_details',
-'Hotel_time',
-'PicturePriming_baseline_acc',
-'PicturePriming_baseline_rt',
-'PicturePriming_priming_prime',
-'PicturePriming_priming_target',
-'Proverbs',
-'RTchoice',
-'RTsimple',
-'Synsem_prop_error',
-'Synsem_RT',
-'TOT',
-'VSTMcolour_K_mean',
-'VSTMcolour_K_precision',
-'VSTMcolour_K_doubt',
-'VSTMcolour_MSE']
+#'CardioMeasures_pulse_mean',
+#'CardioMeasures_bp_sys_mean',
+#'CardioMeasures_bp_dia_mean',
+'Cattell_total']
+#'EkmanEmHex_pca1',
+#'EkmanEmHex_pca1_expv',
+#'FamousFaces_details',
+#'Hotel_time',
+#'PicturePriming_baseline_acc',
+#'PicturePriming_baseline_rt',
+#'PicturePriming_priming_prime',
+#'PicturePriming_priming_target',
+#"Proverbs","Synsem_prop_error","TOT",
+#'RTchoice',
+#'RTsimple',
+
+#'Synsem_RT',
+
+#'VSTMcolour_K_mean',
+#'VSTMcolour_K_precision',
+#'VSTMcolour_K_doubt',
+#'VSTMcolour_MSE']
 df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
 
+#embeddings.to_csv(f"results/multivariate/embeddings_test_1", index=True)
+
+df.to_csv(f"results/multivariate/new_decoder_2_targets_temp_0_001.csv", index=True)
+
+embedding_data = []
+for experiment_embedding in embeddings:
+    for key, values in experiment_embedding.items():
+        for value in values:
+            embedding_data.append({
+                'dataset': key,
+                'index': value['index'],
+                'target_embedded': value['target_embedded'],
+                'feature_embedded': value['feature_embedded']
+            })
+
+embedding_df = pd.DataFrame(embedding_data)
+embedding_df.to_csv(f"results/multivariate/embedding_new_decoder_2_targets_temp_0_001.csv", index=False)
 
 
-df.to_csv(f"results/multivariate/test_4.csv", index=True)
+flat_losses = [df for sublist in losses for df in sublist]
+
+# Concatenate all DataFrames into one single DataFrame
+all_losses_df = pd.concat(flat_losses, ignore_index=True)
+
+# Define the file path for saving the concatenated DataFrame
+all_losses_file_path = "results/multivariate/loss_new_decoder_2_targets_temp_0_001.csv"
+
+# Save concatenated DataFrame to CSV
+all_losses_df.to_csv(all_losses_file_path, index=False)
+# %%
