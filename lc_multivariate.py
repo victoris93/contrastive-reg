@@ -27,7 +27,7 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 
 torch.cuda.empty_cache()
-multi_gpu = True
+multi_gpu = False
 
 # %%
 # data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
@@ -36,8 +36,8 @@ multi_gpu = True
 # %%
 # THRESHOLD = float(sys.argv[1])
 THRESHOLD = 0
-SELECTED_REGIONS = None
-FUNCTION = None
+SELECTED_REGIONS = None#[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1']
+FUNCTION = None#'deactivate_selected_regions'
 # AUGMENTATION = sys.argv[1]
 
 # %%
@@ -53,6 +53,10 @@ class MLP(nn.Module):
         input_dim_feat,
         input_dim_target,
         hidden_dim_feat,
+        hidden_dim_target,
+        hidden_dim_target_2,
+        hidden_dim_target_3,
+        hidden_dim_target_4,
         output_dim,
         dropout_rate,
     ):
@@ -86,6 +90,7 @@ class MLP(nn.Module):
             nn.Linear(hidden_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_feat, output_dim)
         )
         self.init_weights(self.target_mlp)
@@ -94,6 +99,7 @@ class MLP(nn.Module):
             nn.Linear(output_dim, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
@@ -101,6 +107,7 @@ class MLP(nn.Module):
             nn.Linear(hidden_dim_feat, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
+            nn.Dropout(p=dropout_rate),
             nn.Linear(hidden_dim_feat, input_dim_target)
         )
         self.init_weights(self.decode_target)
@@ -133,11 +140,11 @@ class MatData(Dataset):
     def __init__(self, path_feat, path_targets, threshold=THRESHOLD, selected_regions = SELECTED_REGIONS, function_to_use=FUNCTION):
         # self.matrices = np.load(path_feat, mmap_mode="r")
         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
-        selected_columns = ["BentonFaces_total", "Cattell_total"]
-        df = pd.read_csv(path_targets, usecols=selected_columns)
+        self.target = torch.tensor(pd.read_csv(path_targets).drop(columns=["Subject", "Unnamed: 0",
+        'CardioMeasures_pulse_mean',
+        'CardioMeasures_bp_sys_mean',
+        'CardioMeasures_bp_dia_mean']).to_numpy(), dtype=torch.float32)
 
-# Convert selected columns to a PyTorch tensor
-        self.target = torch.tensor(df.to_numpy(), dtype=torch.float32)       
         #self.target = torch.tensor(pd.read_csv(path_targets)["BentonFaces_total","Cattell_total"].to_numpy(), dtype=torch.float32)
         if threshold > 0:
             self.matrices = self.threshold(self.matrices, threshold)
@@ -423,13 +430,17 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
     input_dim_feat = 4950
     # the rest is arbitrary
     hidden_dim_feat = 1000
-    input_dim_target = 2
-    output_dim = 3
+    hidden_dim_target =10
+    hidden_dim_target_2 = 100
+    hidden_dim_target_3 =1000
+    hidden_dim_target_4 = 10000
+    input_dim_target = 20
+    output_dim = 2
     
 
     num_epochs = 100
 
-    lr = 0.1  # too low values return nan loss
+    lr = 0.0001  # too low values return nan loss
     kernel = multivariate_cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
@@ -445,15 +456,19 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             input_dim_feat,
             input_dim_target,
             hidden_dim_feat,
+            hidden_dim_target,
+            hidden_dim_target_2,
+            hidden_dim_target_3,
+            hidden_dim_target_4,
             output_dim,
             dropout_rate=dropout_rate,
         ).to(device)
 
     criterion_pft = KernelizedSupCon(
-        method="expw", temperature=0.001, base_temperature=0.001, kernel=kernel, krnl_sigma=1/50
+        method="expw", temperature=0.01, base_temperature=0.01, kernel=kernel, krnl_sigma=1/50
     )
     criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=0.001, base_temperature=0.001, kernel=kernel, krnl_sigma=1/50
+        method="expw", temperature=0.01, base_temperature=0.01, kernel=kernel, krnl_sigma=1/50
     )
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1)
@@ -499,11 +514,11 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 kernel_target = criterion_ptt(out_target, targets)
                 
                 #joint_embedding = 1000 * nn.functional.cosine_embedding_loss(out_feat, out_target, cosine_target)
-                target_decoding = (.1/input_dim_target)*nn.functional.mse_loss(torch.cat(n_views*[target_destandardized], dim=0), out_target_decoded_destandardized)
+                target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
 
                 loss = kernel_feature + kernel_target + joint_embedding + target_decoding
                 loss.backward()
-                #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
@@ -675,8 +690,8 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 # %%
-path_feat = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
-path_target = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
+path_feat = "/storage/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
+path_target = "/storage/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
 random_state = np.random.RandomState(seed=42)
 dataset = MatData(path_feat, path_target, threshold=THRESHOLD,
     selected_regions = SELECTED_REGIONS, function_to_use = FUNCTION)
@@ -763,34 +778,32 @@ df = pd.DataFrame(prediction_mape_by_element)
 #loss  = pd.DataFrame(losses)
 #loss.to_csv(f"results/multivariate/loss_test_1_lr_000001.csv", index=True)
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-df.columns = ['train_ratio', 'experiment', 'dataset', 'BentonFaces_total',
-#'CardioMeasures_pulse_mean',
-#'CardioMeasures_bp_sys_mean',
-#'CardioMeasures_bp_dia_mean',
-'Cattell_total']
-#'EkmanEmHex_pca1',
-#'EkmanEmHex_pca1_expv',
-#'FamousFaces_details',
-#'Hotel_time',
-#'PicturePriming_baseline_acc',
-#'PicturePriming_baseline_rt',
-#'PicturePriming_priming_prime',
-#'PicturePriming_priming_target',
-#"Proverbs","Synsem_prop_error","TOT",
-#'RTchoice',
-#'RTsimple',
-
-#'Synsem_RT',
-
-#'VSTMcolour_K_mean',
-#'VSTMcolour_K_precision',
-#'VSTMcolour_K_doubt',
-#'VSTMcolour_MSE']
+df.columns = ['train_ratio', 'experiment', 'dataset', 
+'BentonFaces_total',
+'Cattell_total',
+'EkmanEmHex_pca1',
+'EkmanEmHex_pca1_expv',
+'FamousFaces_details',
+'Hotel_time',
+'PicturePriming_baseline_acc',
+'PicturePriming_baseline_rt',
+'PicturePriming_priming_prime',
+'PicturePriming_priming_target',
+"Proverbs",
+'RTchoice',
+'RTsimple',
+"Synsem_prop_error",
+'Synsem_RT',
+"TOT",
+'VSTMcolour_K_mean',
+'VSTMcolour_K_precision',
+'VSTMcolour_K_doubt',
+'VSTMcolour_MSE']
 df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
 
 #embeddings.to_csv(f"results/multivariate/embeddings_test_1", index=True)
 
-df.to_csv(f"results/multivariate/new_decoder_2_targets_temp_0_001.csv", index=True)
+df.to_csv(f"results/multivariate/less_deep_decoding.csv", index=True)
 
 embedding_data = []
 for experiment_embedding in embeddings:
@@ -804,7 +817,7 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embedding_new_decoder_2_targets_temp_0_001.csv", index=False)
+embedding_df.to_csv(f"results/multivariate/embedding_less_deep_decoding.csv", index=False)
 
 
 flat_losses = [df for sublist in losses for df in sublist]
@@ -813,7 +826,7 @@ flat_losses = [df for sublist in losses for df in sublist]
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/loss_new_decoder_2_targets_temp_0_001.csv"
+all_losses_file_path = "results/multivariate/loss_less_deep_decoding.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
