@@ -474,19 +474,16 @@ def multivariate_cauchy(x, krnl_sigma):
 
 
 
-def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
+def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=300, batch_size=32):
     input_dim_feat = 79800
     input_dim_target = 2
     # the rest is arbitrary
     hidden_dim_feat = 1000
     
     
-    output_dim_target = 100
+    output_dim_target = 50
     output_dim_feat = 500
     
-
-    num_epochs = 100
-
     lr = 0.01  # too low values return nan loss
     kernel = multivariate_cauchy
     batch_size = 32  # too low values return nan loss
@@ -538,7 +535,6 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 features = features.to(device)
                 targets = targets.to(device)
                 #target_destandardized = targets*std+mean
-                print(targets.shape)
                 ##JOINT EMBEDDING
                 out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
                 #print("out_target", out_target.shape)
@@ -734,7 +730,9 @@ class Experiment(submitit.helpers.Checkpointable):
                         self.embeddings[label].append({
                             'index': idx,
                             'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_embedded[i].cpu().numpy()
+                            'feature_embedded': X_embedded[i].cpu().numpy(),
+#                             'y': y.cpu().numpy(),
+#                             'y_pred': y_pred.cpu().numpy(),
                         })
                     
             self.results = (losses, predictions, self.embeddings)
@@ -819,7 +817,23 @@ losses, predictions, embeddings = zip(*experiment_results)
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
     prediction_metrics.update(prediction)
-print("prediction_metrics: ", prediction_metrics)
+
+pred_results = []
+for k, v in prediction_metrics.items():
+    true_targets, predicted_targets, indices = v
+    true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
+                                 "experiment":[k[1]] * len(true_targets),
+                                 "dataset":[k[2]] * len(true_targets),
+                                 "cbcl_scr_syn_internal_r": true_targets[:, 0],
+                                 "cbcl_scr_syn_external_r": true_targets[:, 1]
+                                })
+    predicted_targets = pd.DataFrame({"cbcl_scr_syn_internal_r_pred": predicted_targets[:, 0],
+                                 "cbcl_scr_syn_external_r_pred": predicted_targets[:, 1],
+                                 "indices": indices})
+    pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
+pred_results = pd.concat(pred_results)
+pred_results.to_csv(f"results/multivariate/pred_results.csv", index=False)
+
 prediction_mape_by_element = []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
