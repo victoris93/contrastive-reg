@@ -479,7 +479,7 @@ def multivariate_cauchy(x, krnl_sigma):
 
 # %%
 
-def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
+def train(train_dataset, test_dataset, mean, std, mean_train_features, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 4950
     input_dim_target = 20
     # the rest is arbitrary
@@ -544,7 +544,7 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 features = features.view(bsz * n_views, n_feat)
                 features = features.to(device)
                 targets = targets.to(device)
-                mean_features = torch.mean(features, dim=0, keepdim=True)
+                mean_features = mean_train_features.expand(int(features.shape[0]), -1)
                 residual_features = features - mean_features
                 
                 ##JOINT EMBEDDING
@@ -608,7 +608,7 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
                     
                     # Save X and X_decoded in the list
-                    mean_features = torch.mean(features, dim=0, keepdim=True)
+                    mean_features = mean_train_features.expand(int(features.shape[0]),-1)
                     residual_features = features - mean_features
                     X_residual_embedded = model.transform_feat(residual_features)
                     X_residual_decoded = model.decode_feats(X_residual_embedded)
@@ -712,11 +712,13 @@ class Experiment(submitit.helpers.Checkpointable):
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 train_features = np.expand_dims(train_features, axis = 1)
             
+            torch_train_feat = torch.tensor(train_features)
+            mean_train_features = torch.mean(torch_train_feat, dim=0)
             train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
             test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, device=device)
+            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, mean_train_features, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
