@@ -58,40 +58,51 @@ class MLP(nn.Module):
         dropout_rate,
     ):
         super(MLP, self).__init__()
+        
+        self.encoder1 = nn.Linear(input_dim_feat, hidden_dim_feat)
+        self.encoder2 = nn.Linear(hidden_dim_feat, hidden_dim_feat)
+        self.encoder3 = nn.Linear(hidden_dim_feat, hidden_dim_feat)
+        self.encoder4 = nn.Linear(hidden_dim_feat, output_dim_feat)
 
         self.feat_mlp = nn.Sequential(
             nn.BatchNorm1d(input_dim_feat),
-            nn.Linear(input_dim_feat, hidden_dim_feat),
+            self.encoder1,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            self.encoder2,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            self.encoder3,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim_feat),
+            self.encoder4,
         )
         self.init_weights(self.feat_mlp)
         
+        self.decoder4 = nn.Linear(output_dim_feat, hidden_dim_feat)
+        self.decoder3 = nn.Linear(hidden_dim_feat, hidden_dim_feat)
+        self.decoder2 = nn.Linear(hidden_dim_feat, hidden_dim_feat)
+        self.decoder1 = nn.Linear(hidden_dim_feat, input_dim_feat)
+
+        
         self.decode_feat = nn.Sequential(
             nn.BatchNorm1d(output_dim_feat),
-            nn.Linear(output_dim_feat, hidden_dim_feat),
+            self.decoder4,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            self.decoder3,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
+            self.decoder2,
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ReLU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, input_dim_feat),
+            self.decoder1,
         )
         self.init_weights(self.decode_feat)
 
@@ -168,6 +179,13 @@ class MLP(nn.Module):
         x_embedding = self.transform_feat(x)
         y_embedding = self.transform_targets(y)
         return x_embedding, y_embedding
+    
+    def tie_weights(self):
+        """Tie the weights of the decoder to be the transpose of the encoder weights."""
+        self.decoder4.weight = nn.Parameter(self.encoder4.weight.t())
+        self.decoder3.weight = nn.Parameter(self.encoder3.weight.t())
+        self.decoder2.weight = nn.Parameter(self.encoder2.weight.t())
+        self.decoder1.weight = nn.Parameter(self.encoder1.weight.t())
 
 # %%
 class MatData(Dataset):
@@ -273,6 +291,7 @@ class MatData(Dataset):
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
         target = self.target[idx]
+        print("matdata", matrix.shape)
         return matrix, target
 
 # %%
@@ -493,7 +512,9 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             output_dim_feat,
             dropout_rate,
         ).to(device)
-
+        
+    #model.tie_weights()
+    
     criterion_pft = KernelizedSupCon(
         method="expw", temperature=0.01, base_temperature=0.01, kernel=kernel, krnl_sigma=1/50
     )
@@ -505,6 +526,7 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
 
     loss_terms = []
     validation = []
+    autoencoder_features = []
     
     torch.cuda.empty_cache()
     gc.collect()
@@ -514,7 +536,6 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
-                
                 bsz = targets.shape[0]
                 n_views = features.shape[1]
                 n_feat = features.shape[-1]
@@ -523,45 +544,35 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 features = features.view(bsz * n_views, n_feat)
                 features = features.to(device)
                 targets = targets.to(device)
-                #target_destandardized = targets*std+mean
+                mean_features = torch.mean(features, dim=0, keepdim=True)
+                residual_features = features - mean_features
                 
                 ##JOINT EMBEDDING
-                out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
-                #print("out_target", out_target.shape)
-                out_feat_reduced = model.transfer_embedding(out_feat)
-                #print("out_feat_reduced", out_feat_reduced.shape)
-                #print("out_feat", out_feat)
-                #print("out target", out_target)
-                #out_feat_reduced_squeezed = out_feat.squeeze()
-                #print("out_feat_reduced_squeezed", out_feat_reduced_squeezed.shape)
-                #joint_embedding = 10*nn.functional.mse_loss(out_feat, out_target)
-                joint_embedding = 100 * nn.functional.cosine_embedding_loss(out_feat_reduced, out_target, torch.ones(out_feat_reduced.shape[0]).to(device))
+                residual_out_feat, out_target = model(residual_features, torch.cat(n_views*[targets], dim=0))
+                residual_out_feat_reduced = model.transfer_embedding(residual_out_feat)
+                joint_embedding = 100 * nn.functional.cosine_embedding_loss(residual_out_feat_reduced, out_target, torch.ones(residual_out_feat_reduced.shape[0]).to(device))
                 
                 
                 ##FEATURE DECODING
-                out_feat_decoded = model.decode_feat(out_feat)
+                #mean_out_feat = torch.mean(out_feat, dim =0, keepdim= True)
+                #residuals_out_feat = out_feat - mean_out_feat
+                residual_out_feat_decoded = model.decode_feat(residual_out_feat)
+                out_feat_decoded = residual_out_feat_decoded + mean_features
                 feature_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[features]), out_feat_decoded)
                 
                 ##KERNEL FEATURE
-                out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
-                out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
-                kernel_feature = criterion_pft(out_feat, targets)
+                residual_out_feat = torch.split(residual_out_feat, [bsz]*n_views, dim=0)
+                residual_out_feat = torch.cat([f.unsqueeze(1) for f in residual_out_feat], dim=1)
+                kernel_feature = criterion_pft(residual_out_feat, targets)
             
                 
                 ##KERNEL TARGET
-                out_target_decoded = model.decode_target(out_target)
-                #out_target_decoded_destandardized = out_target_decoded*std+mean
-                #print("out target decoded",out_target_decoded)
-                #cosine_target = torch.ones(len(out_target), device=device)                
+                out_target_decoded = model.decode_target(out_target)               
                 out_target = torch.split(out_target, [bsz]*n_views, dim=0)
                 out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
                 kernel_target = criterion_ptt(out_target, targets)
                 
                 ##TARGET DECODING
-                #print("target", targets.shape)
-                #print("target modified", torch.cat(n_views*[targets], dim=0).shape)
-                #print("out_feat_reduced", out_feat_reduced.shape)
-                #target_pred = model.decode_target(out_feat_reduced)
                 target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
 
                 loss = kernel_feature + kernel_target + joint_embedding + target_decoding
@@ -591,14 +602,23 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                         features = features.view(bsz * n_views, n_feat)
                     features, targets = features.to(device), targets.to(device)
                     targets = targets*std - mean
-                    
                     out_feat = model.transform_feat(features)
-                    
                     out_target_decoded = model.decode_target(model.transfer_embedding(out_feat))
                     out_target_decoded = out_target_decoded*std-mean
-                    
-
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
+                    
+                    # Save X and X_decoded in the list
+                    mean_features = torch.mean(features, dim=0, keepdim=True)
+                    residual_features = features - mean_features
+                    X_residual_embedded = model.transform_feat(residual_features)
+                    X_residual_decoded = model.decode_feats(X_residual_embedded)
+                    X_decoded = X_residual_decoded + mean_features
+                    for i in range(X_decoded.shape[0]):
+                        feat_dec = X_decoded[i, :]
+                        original_feat = features[i,:]
+                        mse_feats = nn.functional.mse_loss(original_feat, feat_dec)
+                        autoencoder_features.append((original_feat.cpu().numpy(), feat_dec.cpu().numpy(), mse_feats.cpu().numpy()))
+
                 validation.append(mae_batch.item())
             scheduler.step(mae_batch)
             if np.log10(scheduler._last_lr[0]) < -4:
@@ -612,8 +632,8 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
             )
     loss_terms = pd.DataFrame(loss_terms)
-    print("loss_terms", loss_terms)
-    return loss_terms, model
+    #print("loss_terms", loss_terms)
+    return loss_terms, model, autoencoder_features
 # %%
 def standardize(data, mean=None, std=None, epsilon = 1e-4):
     if mean is None:
@@ -646,6 +666,7 @@ class Experiment(submitit.helpers.Checkpointable):
 
             # print("Data loaded", flush=True)
             predictions = {}
+            autoencoder_features = {}
             losses = []
             self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
 
@@ -695,7 +716,7 @@ class Experiment(submitit.helpers.Checkpointable):
             test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, device=device)
+            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -713,17 +734,19 @@ class Experiment(submitit.helpers.Checkpointable):
                     y = torch.stack(y).to(device)
                     X_embedded = model.transform_feat(X)
                     y_embedded = model.transform_targets(y)
+                    X_emb = model.transfer_embedding(X_embedded)
                     y = y*std + mean
                     y_pred = model.decode_target(model.transfer_embedding(X_embedded))*std + mean
+                    
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
                             'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_embedded[i].cpu().numpy()
+                            'feature_embedded': X_emb[i].cpu().numpy()
                         })
                     
-            self.results = (losses, predictions, self.embeddings)
+            self.results = (losses, predictions, self.embeddings, autoencoder_features)
             
         if path:
             self.save(path)
@@ -800,7 +823,7 @@ else:
             
 
 # %%
-losses, predictions, embeddings = zip(*experiment_results)
+losses, predictions, embeddings, autoencoder_features = zip(*experiment_results)
 
 #print("predicitons", predictions)
 prediction_metrics = predictions[0]
@@ -852,8 +875,8 @@ df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index
 
 #embeddings.to_csv(f"results/multivariate/embeddings_test_1", index=True)
 
-df.to_csv(f"results/multivariate/less_deep_decoding.csv", index=True)
-
+df.to_csv(f"results/multivariate/residuals.csv", index = False)
+          
 embedding_data = []
 for experiment_embedding in embeddings:
     for key, values in experiment_embedding.items():
@@ -866,7 +889,7 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embedding_less_deep_decoding.csv", index=False)
+embedding_df.to_csv(f"results/multivariate/embedding_residuals.csv", index=False)
 
 
 flat_losses = [df for sublist in losses for df in sublist]
@@ -875,8 +898,26 @@ flat_losses = [df for sublist in losses for df in sublist]
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/loss_less_deep_decoding.csv"
+all_losses_file_path = "results/multivariate/loss_residuals.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
+
+#autoencoder_features_flat = autoencoder_features[0]
+#for auto_feat in autoencoder_features[1:]:
+#    autoencoder_features_flat.update(auto_feat)
+autoencoder_features_flat = [item for sublist in autoencoder_features for item in sublist]  # Flatten the list of lists
+
+# Convert to DataFrame (if necessary)
+autoencoder_features_df = pd.DataFrame(autoencoder_features_flat, columns=["Original", "Reconstructed", "MSE"])
+
+# Extract the arrays from DataFrame columns
+original_array = np.array(autoencoder_features_df['Original'].tolist())
+reconstructed_array = np.array(autoencoder_features_df['Reconstructed'].tolist())
+mse_array = np.array(autoencoder_features_df['MSE'].tolist())
+
+# Save each array separately as .npy files
+np.save("results/multivariate/original_residuals.npy", original_array)
+np.save("results/multivariate/reconstructed_residuals.npy", reconstructed_array)
+np.save("results/multivariate/mse_residuals.npy", mse_array)
 # %%
