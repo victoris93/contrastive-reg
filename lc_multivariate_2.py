@@ -575,7 +575,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, model=Non
                 ##TARGET DECODING
                 target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
 
-                loss = kernel_feature + kernel_target + joint_embedding + target_decoding
+                loss = kernel_feature + feature_decoding + kernel_target + 10*joint_embedding + 10*target_decoding
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -604,8 +604,8 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, model=Non
                     targets = targets*std - mean
                     out_feat = model.transform_feat(features)
                     out_target_decoded = model.decode_target(model.transfer_embedding(out_feat))
-                    out_target_decoded = out_target_decoded*std-mean
-                    mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
+                    out_target_decoded_1 = out_target_decoded*std-mean
+                    mae_batch += (targets - out_target_decoded_1).abs().mean() / len(test_loader)
                     
                     # Save X and X_decoded in the list
                     mean_features = mean_train_features.expand(int(features.shape[0]),-1)
