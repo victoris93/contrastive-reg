@@ -1,4 +1,6 @@
+# %%
 import math
+import xarray as xr
 import asyncio
 import submitit
 import pickle
@@ -28,10 +30,9 @@ import random
 torch.cuda.empty_cache()
 multi_gpu = True
 
+# %%
+# %%
 fmri_data_path = '/gpfs3/well/margulies/projects/ABCD/fmriresults01/abcd-mproc-release5'
-
-# data_path = Path('~/research/data/victoria_mat_age/data_mat_age_demian').expanduser()
-# -
 
 # THRESHOLD = float(sys.argv[1])
 THRESHOLD = 0
@@ -39,8 +40,12 @@ SELECTED_REGIONS = None #[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1'
 FUNCTION = None #'deactivate_selected_regions'
 AUGMENTATION = None
 
+# %%
+# %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# %%
+# %%
 class MLP(nn.Module):
     def __init__(
         self,
@@ -163,139 +168,41 @@ class MLP(nn.Module):
         y_embedding = self.transform_targets(y)
         return x_embedding, y_embedding
 
-# class MatData(Dataset):
-#     def __init__(self, path_feat, path_targets, threshold=THRESHOLD, selected_regions = SELECTED_REGIONS, function_to_use=FUNCTION):
-#         # self.matrices = np.load(path_feat, mmap_mode="r")
-#         self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
-#         self.target = torch.tensor(pd.read_csv(path_targets).drop(columns=["Subject", "Unnamed: 0",
-#         'CardioMeasures_pulse_mean',
-#         'CardioMeasures_bp_sys_mean',
-#         'CardioMeasures_bp_dia_mean']).to_numpy(), dtype=torch.float32)
-
-#         #self.target = torch.tensor(pd.read_csv(path_targets)["BentonFaces_total","Cattell_total"].to_numpy(), dtype=torch.float32)
-#         if threshold > 0:
-#             self.matrices = self.threshold(self.matrices, threshold)
-#             #self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-#         gc.collect()
-
-#         if selected_regions is not None:
-#             self.matrices = self.process_selected_regions(self.matrices, selected_regions, function_to_use)
-#             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-#         else: 
-#             self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-#         gc.collect()
-
-#     def process_selected_regions(self, matrix, selected_regions, function_to_use):
-#         if function_to_use == 'deactivate_selected_regions':
-#             return self.deactivate_selected_regions(matrix, selected_regions)
-#         elif function_to_use == 'deactivate_not_selected_regions':
-#             return self.deactivate_not_selected_regions(matrix, selected_regions)
-#         elif function_to_use == 'replace_selected_regions':
-#             return self.replace_selected_regions(matrix, selected_regions)
-#         elif function_to_use == 'replace_selected_regions_2':
-#             return self.replace_selected_regions_2(matrix, selected_regions)
-#         else:
-#             raise ValueError(f"Unknown function_to_use: {function_to_use}")
-
-#     def deactivate_selected_regions(self, matrix, selected_regions):
-#         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
-#         atlas_labels = atlas_data.labels
-#         for label in selected_regions:
-#             parcel_index = np.where(atlas_labels == label)[0][0]
-#             matrix[:, parcel_index, :] = 0
-#             matrix[:, :, parcel_index] = 0
-#         return matrix
-
-#     def deactivate_not_selected_regions(self, matrix, selected_regions):
-#         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
-#         atlas_labels = atlas_data.labels
-
-#         indices_to_keep = [np.where(atlas_labels == label)[0][0] for label in selected_regions]
-
-#         deactivated_matrix = np.zeros_like(matrix)
-
-#         for idx in indices_to_keep:
-#             deactivated_matrix[:, idx, :] = matrix[:, idx, :]
-#             deactivated_matrix[:, :, idx] = matrix[:, :, idx]
-
-#         return deactivated_matrix
-
-#     def replace_selected_regions(self, matrix, selected_regions):
-#         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
-#         atlas_labels = atlas_data.labels
-
-#         indices_to_replace = [np.where(atlas_labels == label)[0][0] for label in selected_regions]
-
-#         modified_matrix = np.copy(matrix)
-#         num_samples = matrix.shape[0]
-
-#         for sample_idx in range(num_samples):
-#             random_sample_idx = random.choice([i for i in range(num_samples) if i != sample_idx])
-#             for idx in indices_to_replace:
-#                 modified_matrix[sample_idx, idx, :] = matrix[random_sample_idx, idx, :]
-#                 modified_matrix[sample_idx, :, idx] = matrix[random_sample_idx, :, idx]
-
-#         return modified_matrix
-
-#     def replace_selected_regions_2(self, matrix, selected_regions):
-#         atlas_data = fetch_atlas_schaefer_2018(n_rois=100, yeo_networks=7, resolution_mm=1)
-#         atlas_labels = atlas_data.labels
-
-#         indices_to_replace = [np.where(atlas_labels == label)[0][0] for label in selected_regions]
-
-#         modified_matrix = np.copy(matrix)
-#         num_samples = matrix.shape[0]
-
-#         for sample_idx in range(num_samples):
-#             for idx in indices_to_replace:
-#                 random_sample_idx = random.choice([i for i in range(num_samples) if i != sample_idx])
-#                 modified_matrix[sample_idx, idx, :] = matrix[random_sample_idx, idx, :]
-#                 modified_matrix[sample_idx, :, idx] = matrix[random_sample_idx, :, idx]
-
-#         return modified_matrix
-
-#     def threshold(self, matrices, threshold):
-#         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
-#         mask = np.abs(matrices) >= perc
-#         thresh_mat = matrices * mask
-#         return thresh_mat
-
-#     def __len__(self):
-#         return len(self.matrices)
-
-#     def __getitem__(self, idx):
-#         matrix = self.matrices[idx]
-#         target = self.target[idx]
-#         return matrix, target
-
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets, target_name, threshold=THRESHOLD):
-        # self.matrices = np.load(path_feat, mmap_mode="r")
-        self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
-        self.target = torch.tensor(
-                pd.read_csv(path_targets, sep = '\t')[target_name].values,
-                dtype=torch.float32
-        )
+    def __init__(self, dataset_path, target_names, threshold=THRESHOLD):
+        if not isinstance(target_names, list):
+            target_names = [target_names]
+        self.target_names = target_names
+        self.threshold = threshold
+        self.data_array = xr.open_dataset(dataset_path)
+        self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
         if threshold > 0:
-            self.matrices = self.threshold(self.matrices, threshold)
+            self.matrices = self.threshold_mat(self.matrices, self.threshold)
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+        self.target = torch.from_numpy(np.array([self.data_array[target_name].values for target_name in self.target_names]).T).to(torch.float32)
+
         gc.collect()
 
-    def threshold(self, matrices, threshold): # as in Margulies et al. (2016)
+    def threshold_mat(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
         mask = np.abs(matrices) >= perc
         thresh_mat = matrices * mask
         return thresh_mat
-
+    
     def __len__(self):
-        return len(self.matrices)
+        return self.data_array.subject.__len__()
+    
     def __getitem__(self, idx):
-        matrix = self.matrices[idx]
-        target = self.target[idx]
+#         matrix = self.data_array.sel(subject = idx).to_array().values
+#         if self.threshold > 0:
+#             matrix = self.threshold_mat(matrix, self.threshold)
+        matrix = matrix = self.matrices[idx]
+        target = torch.from_numpy(np.array([self.data_array.sel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        
         return matrix, target
 
-# loss from: https://github.com/EIDOSLAB/contrastive-brain-age-prediction/blob/master/src/losses.py
-# modified to accept input shape [bsz, n_feats]. In the age paper: [bsz, n_views, n_feats].
+# %%
+# %%
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR
@@ -451,6 +358,8 @@ class KernelizedSupCon(nn.Module):
         loss = -(self.temperature / self.base_temperature) * log_prob
         return loss.mean()
 
+# %%
+# %%
 def gaussian_kernel(x, krnl_sigma):
     x = x - x.T
     return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (math.sqrt(2 * torch.pi))
@@ -472,20 +381,21 @@ def multivariate_cauchy(x, krnl_sigma):
     x = torch.cdist(x, x)
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
+# %%
+# %%
 
-
-def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=300, batch_size=32):
+def train(train_dataset, test_dataset, mean, std, mean_train_features, model=None, device=device, kernel=multivariate_cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 79800
-    input_dim_target = 2
+    input_dim_target = 1
     # the rest is arbitrary
     hidden_dim_feat = 1000
     
     
-    output_dim_target = 50
+    output_dim_target = 2
     output_dim_feat = 500
     
-    lr = 0.01  # too low values return nan loss
-    kernel = multivariate_cauchy
+    lr = 0.0001  # too low values return nan loss
+    kernel = cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
     weight_decay = 0
@@ -516,9 +426,11 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
 
     loss_terms = []
     validation = []
+    autoencoder_features = []
     
     torch.cuda.empty_cache()
     gc.collect()
+    mean_train_features = mean_train_features.to(device)
 
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
@@ -534,47 +446,40 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 features = features.view(bsz * n_views, n_feat)
                 features = features.to(device)
                 targets = targets.to(device)
+                
+                mean_features = mean_train_features.expand(int(features.shape[0]), -1)
+                residual_features = features - mean_features
                 #target_destandardized = targets*std+mean
+                
                 ##JOINT EMBEDDING
-                out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
-                #print("out_target", out_target.shape)
-                out_feat_reduced = model.transfer_embedding(out_feat)
-                #print("out_feat_reduced", out_feat_reduced.shape)
-                #print("out_feat", out_feat)
-                #print("out target", out_target)
-                #out_feat_reduced_squeezed = out_feat.squeeze()
-                #print("out_feat_reduced_squeezed", out_feat_reduced_squeezed.shape)
-                #joint_embedding = 10*nn.functional.mse_loss(out_feat, out_target)
-                joint_embedding = 100 * nn.functional.cosine_embedding_loss(out_feat_reduced, out_target, torch.ones(out_feat_reduced.shape[0]).to(device))
+                residual_out_feat, out_target = model(residual_features, torch.cat(n_views*[targets], dim=0))
+                residual_out_feat_reduced = model.transfer_embedding(residual_out_feat)
+                joint_embedding = 100 * nn.functional.cosine_embedding_loss(residual_out_feat_reduced, out_target, torch.ones(residual_out_feat_reduced.shape[0]).to(device))
                 
                 
                 ##FEATURE DECODING
-                out_feat_decoded = model.decode_feat(out_feat)
+                #mean_out_feat = torch.mean(out_feat, dim =0, keepdim= True)
+                #residuals_out_feat = out_feat - mean_out_feat
+                residual_out_feat_decoded = model.decode_feat(residual_out_feat)
+                out_feat_decoded = residual_out_feat_decoded + mean_features
                 feature_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[features]), out_feat_decoded)
                 
                 ##KERNEL FEATURE
-                out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
-                out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
-                kernel_feature = criterion_pft(out_feat, targets)
+                residual_out_feat = torch.split(residual_out_feat, [bsz]*n_views, dim=0)
+                residual_out_feat = torch.cat([f.unsqueeze(1) for f in residual_out_feat], dim=1)
+                kernel_feature = criterion_pft(residual_out_feat, targets)
             
                 
                 ##KERNEL TARGET
-                out_target_decoded = model.decode_target(out_target)
-                #out_target_decoded_destandardized = out_target_decoded*std+mean
-                #print("out target decoded",out_target_decoded)
-                #cosine_target = torch.ones(len(out_target), device=device)                
+                out_target_decoded = model.decode_target(out_target)               
                 out_target = torch.split(out_target, [bsz]*n_views, dim=0)
                 out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
                 kernel_target = criterion_ptt(out_target, targets)
                 
                 ##TARGET DECODING
-                #print("target", targets.shape)
-                #print("target modified", torch.cat(n_views*[targets], dim=0).shape)
-                #print("out_feat_reduced", out_feat_reduced.shape)
-                #target_pred = model.decode_target(out_feat_reduced)
                 target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
 
-                loss = kernel_feature + kernel_target + joint_embedding + target_decoding
+                loss = kernel_feature + feature_decoding + kernel_target + 10*joint_embedding + 10*target_decoding
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -600,15 +505,24 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                         n_views = features.shape[1]
                         features = features.view(bsz * n_views, n_feat)
                     features, targets = features.to(device), targets.to(device)
-                    targets = targets*std - mean
-                    
+#                     targets = targets*std - mean
                     out_feat = model.transform_feat(features)
-                    
                     out_target_decoded = model.decode_target(model.transfer_embedding(out_feat))
-                    out_target_decoded = out_target_decoded*std-mean
-                    
-
+#                     out_target_decoded_1 = out_target_decoded*std-mean
                     mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
+                    
+                    # Save X and X_decoded in the list
+                    mean_features = mean_train_features.expand(int(features.shape[0]),-1)
+                    residual_features = features - mean_features
+                    X_residual_embedded = model.transform_feat(residual_features)
+                    X_residual_decoded = model.decode_feats(X_residual_embedded)
+                    X_decoded = X_residual_decoded + mean_features
+                    for i in range(X_decoded.shape[0]):
+                        feat_dec = X_decoded[i, :]
+                        original_feat = features[i,:]
+                        mse_feats = nn.functional.mse_loss(original_feat, feat_dec)
+                        autoencoder_features.append((original_feat.cpu().numpy(), feat_dec.cpu().numpy(), mse_feats.cpu().numpy()))
+
                 validation.append(mae_batch.item())
             scheduler.step(mae_batch)
             if np.log10(scheduler._last_lr[0]) < -4:
@@ -622,8 +536,11 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
             )
     loss_terms = pd.DataFrame(loss_terms)
-    print("loss_terms", loss_terms)
-    return loss_terms, model
+    #print("loss_terms", loss_terms)
+    return loss_terms, model, autoencoder_features
+
+# %%
+# %%
 
 def standardize(data, mean=None, std=None, epsilon = 1e-4):
     if mean is None:
@@ -632,6 +549,8 @@ def standardize(data, mean=None, std=None, epsilon = 1e-4):
         std = np.std(data, axis=0)+ epsilon
     return (data - mean)/std, mean, std
 
+# %%
+# %%
 class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
@@ -656,6 +575,7 @@ class Experiment(submitit.helpers.Checkpointable):
 
             # print("Data loaded", flush=True)
             predictions = {}
+            autoencoder_features = {}
             losses = []
             self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
 
@@ -700,12 +620,13 @@ class Experiment(submitit.helpers.Checkpointable):
             else:
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 train_features = np.expand_dims(train_features, axis = 1)
-            
+            torch_train_feat = torch.tensor(train_features)
+            mean_train_features = torch.mean(torch_train_feat, dim=0)
             train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
             test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, device=device)
+            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, mean_train_features, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -723,19 +644,19 @@ class Experiment(submitit.helpers.Checkpointable):
                     y = torch.stack(y).to(device)
                     X_embedded = model.transform_feat(X)
                     y_embedded = model.transform_targets(y)
-                    y = y*std + mean
-                    y_pred = model.decode_target(model.transfer_embedding(X_embedded))*std + mean
+                    X_emb = model.transfer_embedding(X_embedded)
+#                     y = y*std + mean
+                    y_pred = model.decode_target(model.transfer_embedding(X_embedded))# *std + mean
+                    
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
                             'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_embedded[i].cpu().numpy(),
-#                             'y': y.cpu().numpy(),
-#                             'y_pred': y_pred.cpu().numpy(),
+                            'feature_embedded': X_emb[i].cpu().numpy()
                         })
                     
-            self.results = (losses, predictions, self.embeddings)
+            self.results = (losses, predictions, self.embeddings, autoencoder_features)
             
         if path:
             self.save(path)
@@ -750,28 +671,37 @@ class Experiment(submitit.helpers.Checkpointable):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
-path_feat = "./ABCD/abcd_matrices.npy"
-path_target = f"{fmri_data_path}/participants.tsv"
+# %%
+# %%
+# +
+# path_feat = "./ABCD/abcd_matrices.npy"
+# path_target = f"{fmri_data_path}/participants.tsv"
+
+dataset_path = "data/scz_dataset_400parcels.nc"
 random_state = np.random.RandomState(seed=42)
-# dataset = MatData(path_feat, path_target, threshold=THRESHOLD,
-#     selected_regions = SELECTED_REGIONS, function_to_use = FUNCTION)
-dataset = MatData(path_feat, path_target, ['cbcl_scr_syn_internal_r', 'cbcl_scr_syn_external_r'], threshold=THRESHOLD)
+# selected_regions = SELECTED_REGIONS, function_to_use = FUNCTION)
+# dataset = MatData(path_feat, path_target, ['cbcl_scr_syn_internal_r', 'cbcl_scr_syn_external_r', 'cbcl_scr_syn_totprob_r','interview_age'], threshold=THRESHOLD)
+dataset = MatData(dataset_path, ['age'], threshold=THRESHOLD)
 n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
-experiments = 30
+experiments = 20
 
+# %%
+# %%
+# +
 if multi_gpu:
     log_folder = Path("log_folder")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
         timeout_min=120,
-        slurm_partition="gpu_short",
-        gpus_per_node=1,
-        tasks_per_node=1,
-        nodes=1,
-        cpus_per_task=30
+        # slurm_account="hjt@v100",
+        slurm_partition="prepost",
+        # gpus_per_node=1,
+        # tasks_per_node=1,
+        # nodes=1,
+        # cpus_per_task=10,
         #slurm_qos="qos_gpu-t3",
         #slurm_constraint="v100-32g",
         #slurm_mem="10G",
@@ -808,32 +738,57 @@ else:
             run_experiment = Experiment()
             job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
             experiment_results.append(job)
-    
 
+# %%
+# %%
 
-losses, predictions, embeddings = zip(*experiment_results)
+losses, predictions, embeddings, autoencoder_features = zip(*experiment_results)
 # print("losses: ", losses)
 # print("predicitons", predictions)
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
     prediction_metrics.update(prediction)
 
+# +
+# pred_results = []
+# for k, v in prediction_metrics.items():
+#     true_targets, predicted_targets, indices = v
+#     true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
+#                                  "experiment":[k[1]] * len(true_targets),
+#                                  "dataset":[k[2]] * len(true_targets),
+#                                  "cbcl_scr_syn_internal_r": true_targets[:, 0],
+#                                  "cbcl_scr_syn_external_r": true_targets[:, 1],
+#                                  "cbcl_scr_syn_totprob_r": true_targets[:, 2],
+#                                  "interview_age": true_targets[:, 3]
+#                                 })
+#     predicted_targets = pd.DataFrame({"cbcl_scr_syn_internal_r_pred": predicted_targets[:, 0],
+#                                  "cbcl_scr_syn_external_r_pred": predicted_targets[:, 1],
+#                                  "cbcl_scr_syn_totprob_r_pred": predicted_targets[:, 2],
+#                                  "interview_age_pred": predicted_targets[:, 3],
+#                                  "indices": indices})
+#     pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
+# pred_results = pd.concat(pred_results)
+# pred_results.to_csv(f"results/multivariate/pred_results.csv", index=False)
+# -
+
+# %%
+# %%
 pred_results = []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
     true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
                                  "experiment":[k[1]] * len(true_targets),
                                  "dataset":[k[2]] * len(true_targets),
-                                 "cbcl_scr_syn_internal_r": true_targets[:, 0],
-                                 "cbcl_scr_syn_external_r": true_targets[:, 1]
+                                 "age": true_targets[:, 0]
                                 })
-    predicted_targets = pd.DataFrame({"cbcl_scr_syn_internal_r_pred": predicted_targets[:, 0],
-                                 "cbcl_scr_syn_external_r_pred": predicted_targets[:, 1],
-                                 "indices": indices})
+    predicted_targets = pd.DataFrame({"age_pred": predicted_targets[:, 0],
+                                      "indices": indices})
     pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
 pred_results = pd.concat(pred_results)
 pred_results.to_csv(f"results/multivariate/pred_results.csv", index=False)
 
+# %%
+# %%
 prediction_mape_by_element = []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
@@ -851,20 +806,23 @@ for k, v in prediction_metrics.items():
         )
 
 df = pd.DataFrame(prediction_mape_by_element)
+
+# %%
+# %%
 #embeddings = pd.DataFrame(embeddings, columns = ["X", "y"])
 #loss  = pd.DataFrame(losses)
 #loss.to_csv(f"results/multivariate/loss_test_1_lr_000001.csv", index=True)
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-df.columns = ['train_ratio', 'experiment', 'dataset', 
-            'cbcl_scr_syn_internal_r',
-            'cbcl_scr_syn_external_r'
-            ]
+# df.columns = ['train_ratio', 'experiment', 'dataset',
+#               'cbcl_scr_syn_internal_r', 'cbcl_scr_syn_external_r',
+#               'cbcl_scr_syn_totprob_r', 'interview_age']
+df.columns = ['train_ratio', 'experiment', 'dataset', 'age']
 df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
+df.to_csv(f"results/multivariate/residuals.csv", index = False)
 
-#embeddings.to_csv(f"results/multivariate/embeddings_test_1", index=True)
 
-df.to_csv(f"results/multivariate/less_deep_decoding.csv", index=True)
-
+# %%
+# %%
 embedding_data = []
 for experiment_embedding in embeddings:
     for key, values in experiment_embedding.items():
@@ -877,18 +835,39 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embedding_less_deep_decoding.csv", index=False)
+embedding_df.to_csv(f"results/multivariate/embedding_residuals.csv", index=False)
 
-
+# +
 flat_losses = [df for sublist in losses for df in sublist]
 
 # Concatenate all DataFrames into one single DataFrame
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/loss_less_deep_decoding.csv"
+all_losses_file_path = "results/multivariate/loss_residuals.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
+
+#autoencoder_features_flat = autoencoder_features[0]
+#for auto_feat in autoencoder_features[1:]:
+#    autoencoder_features_flat.update(auto_feat)
+autoencoder_features_flat = [item for sublist in autoencoder_features for item in sublist]  # Flatten the list of lists
+
+# Convert to DataFrame (if necessary)
+autoencoder_features_df = pd.DataFrame(autoencoder_features_flat, columns=["Original", "Reconstructed", "MSE"])
+
+# Extract the arrays from DataFrame columns
+original_array = np.array(autoencoder_features_df['Original'].tolist())
+reconstructed_array = np.array(autoencoder_features_df['Reconstructed'].tolist())
+mse_array = np.array(autoencoder_features_df['MSE'].tolist())
+
+# Save each array separately as .npy files
+np.save("results/multivariate/original_residuals.npy", original_array)
+np.save("results/multivariate/reconstructed_residuals.npy", reconstructed_array)
+np.save("results/multivariate/mse_residuals.npy", mse_array)
+
+# %%
+# %%
 
 
