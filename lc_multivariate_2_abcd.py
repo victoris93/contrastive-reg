@@ -194,8 +194,6 @@ class MatData(Dataset):
         
         return matrix, target
 
-# loss from: https://github.com/EIDOSLAB/contrastive-brain-age-prediction/blob/master/src/losses.py
-# modified to accept input shape [bsz, n_feats]. In the age paper: [bsz, n_views, n_feats].
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR
@@ -370,11 +368,9 @@ def multivariate_cauchy(x, krnl_sigma):
     x = torch.cdist(x, x)
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
-
-
-def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=300, batch_size=32):
+def train(train_dataset, test_dataset, mean, std, mean_train_features, model=None, device=device, kernel=multivariate_cauchy, num_epochs=100, batch_size=32):
     input_dim_feat = 79800
-    input_dim_target = 12
+    input_dim_target = 3
     # the rest is arbitrary
     hidden_dim_feat = 1000
     
@@ -382,8 +378,8 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
     output_dim_target = 2
     output_dim_feat = 500
     
-    lr = 0.01  # too low values return nan loss
-    kernel = multivariate_cauchy
+    lr = 0.0001  # too low values return nan loss
+#     kernel = cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
     weight_decay = 0
@@ -414,25 +410,29 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
 
     loss_terms = []
     validation = []
+    autoencoder_features = []
     
     torch.cuda.empty_cache()
     gc.collect()
+    mean_train_features = mean_train_features.to(device)
 
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
-                
+                print("Features shape: ", features.shape)
                 bsz = targets.shape[0]
-                n_views = features.shape[1]
+                n_views = 1
                 n_feat = features.shape[-1]
                 
                 optimizer.zero_grad()
                 features = features.view(bsz * n_views, n_feat)
+                print("Features shape: ", features.shape)
                 features = features.to(device)
                 targets = targets.to(device)
                 #target_destandardized = targets*std+mean
+                
                 ##JOINT EMBEDDING
                 out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
                 #print("out_target", out_target.shape)
@@ -448,12 +448,13 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 
                 ##FEATURE DECODING
                 out_feat_decoded = model.decode_feat(out_feat)
+                print("Features shape: ", torch.cat(n_views*[features]).shape)
                 feature_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[features]), out_feat_decoded)
                 
                 ##KERNEL FEATURE
                 out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
                 out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
-                kernel_feature = criterion_pft(out_feat, targets)
+                # kernel_feature = criterion_pft(out_feat, targets)
             
                 
                 ##KERNEL TARGET
@@ -472,13 +473,13 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 #target_pred = model.decode_target(out_feat_reduced)
                 target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
 
-                loss = kernel_feature + kernel_target + joint_embedding + target_decoding
+                loss = kernel_target + joint_embedding + target_decoding # + kernel_feature
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                loss_terms_batch['kernel_feature'] += kernel_feature.item() / len(train_loader)
+                # loss_terms_batch['kernel_feature'] += kernel_feature.item() / len(train_loader)
                 loss_terms_batch['kernel_target'] += kernel_target.item() / len(train_loader)
                 loss_terms_batch['joint_embedding'] += joint_embedding.item() / len(train_loader)
                 loss_terms_batch['target_decoding'] += target_decoding.item() / len(train_loader)
@@ -598,12 +599,13 @@ class Experiment(submitit.helpers.Checkpointable):
             else:
                 train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
                 train_features = np.expand_dims(train_features, axis = 1)
-            
+            torch_train_feat = torch.tensor(train_features)
+            mean_train_features = torch.mean(torch_train_feat, dim=0)
             train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
             test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, device=device)
+            loss_terms, model = train(train_dataset, test_dataset,mean, std, mean_train_features, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -621,19 +623,19 @@ class Experiment(submitit.helpers.Checkpointable):
                     y = torch.stack(y).to(device)
                     X_embedded = model.transform_feat(X)
                     y_embedded = model.transform_targets(y)
-                    y = y*std + mean
-                    y_pred = model.decode_target(model.transfer_embedding(X_embedded))*std + mean
+                    X_emb = model.transfer_embedding(X_embedded)
+#                     y = y*std + mean
+                    y_pred = model.decode_target(model.transfer_embedding(X_embedded))# *std + mean
+                    
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
                             'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_embedded[i].cpu().numpy(),
-#                             'y': y.cpu().numpy(),
-#                             'y_pred': y_pred.cpu().numpy(),
+                            'feature_embedded': X_emb[i].cpu().numpy()
                         })
                     
-            self.results = (losses, predictions, self.embeddings)
+            self.results = (losses, predictions, self.embeddings, model.state_dict)
             
         if path:
             self.save(path)
@@ -649,20 +651,13 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 dataset_path = "data/abcd_dataset_400parcels.nc"
+
 random_state = np.random.RandomState(seed=42)
 # selected_regions = SELECTED_REGIONS, function_to_use = FUNCTION)
 # dataset = MatData(path_feat, path_target, ['cbcl_scr_syn_internal_r', 'cbcl_scr_syn_external_r', 'cbcl_scr_syn_totprob_r','interview_age'], threshold=THRESHOLD)
-dataset = MatData(dataset_path, ['interview_age','cbcl_scr_syn_anxdep_r',
-                            'cbcl_scr_syn_withdep_r',
-                            'cbcl_scr_syn_somatic_r',
-                           'cbcl_scr_syn_social_r',
-                           'cbcl_scr_syn_rulebreak_r',
-                           'cbcl_scr_syn_aggressive_r',
-                           'cbcl_scr_syn_thought_r',
-                           'cbcl_scr_syn_attention_r',
+dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
                            'cbcl_scr_syn_internal_r',
-                           'cbcl_scr_syn_external_r',
-                           'cbcl_scr_syn_totprob_r'], threshold=THRESHOLD)
+                           'cbcl_scr_syn_external_r',], threshold=THRESHOLD)
 n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
@@ -673,15 +668,14 @@ if multi_gpu:
     log_folder = Path("log_folder")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
-        timeout_min=60,
-        # slurm_account="ftj@a100",
+        # timeout_min=120,
         slurm_partition="prepost",
         # gpus_per_node=1,
         # tasks_per_node=1,
         # nodes=1,
-        # cpus_per_task=30,
+        # cpus_per_task=30
         #slurm_qos="qos_gpu-t3",
-        # slurm_constraint="a100",
+        #slurm_constraint="v100-32g",
         #slurm_mem="10G",
         #slurm_additional_parameters={"requeue": True}
     )
@@ -705,7 +699,7 @@ if multi_gpu:
             experiment_results.append(res)
         return experiment_results
     experiment_results = asyncio.run(get_result(experiment_jobs))
-
+    
 else:
     experiment_results = []
     
@@ -717,12 +711,34 @@ else:
             job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
             experiment_results.append(job)
 
-losses, predictions, embeddings = zip(*experiment_results)
-# print("losses: ", losses)
-# print("predicitons", predictions)
+losses, predictions, embeddings, model_state_dict = zip(*experiment_results)
+
+# SAVE MODEL PARAMS
+torch.save(model_state_dict, 'results/multivariate/abcd/model.pkl')
+
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
     prediction_metrics.update(prediction)
+
+# pred_results = []
+# for k, v in prediction_metrics.items():
+#     true_targets, predicted_targets, indices = v
+#     true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
+#                                  "experiment":[k[1]] * len(true_targets),
+#                                  "dataset":[k[2]] * len(true_targets),
+#                                  "cbcl_scr_syn_internal_r": true_targets[:, 0],
+#                                  "cbcl_scr_syn_external_r": true_targets[:, 1],
+#                                  "cbcl_scr_syn_totprob_r": true_targets[:, 2],
+#                                  "interview_age": true_targets[:, 3]
+#                                 })
+#     predicted_targets = pd.DataFrame({"cbcl_scr_syn_internal_r_pred": predicted_targets[:, 0],
+#                                  "cbcl_scr_syn_external_r_pred": predicted_targets[:, 1],
+#                                  "cbcl_scr_syn_totprob_r_pred": predicted_targets[:, 2],
+#                                  "interview_age_pred": predicted_targets[:, 3],
+#                                  "indices": indices})
+#     pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
+# pred_results = pd.concat(pred_results)
+# pred_results.to_csv(f"results/multivariate/pred_results.csv", index=False)
 
 pred_results = []
 for k, v in prediction_metrics.items():
@@ -730,35 +746,18 @@ for k, v in prediction_metrics.items():
     true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
                                  "experiment":[k[1]] * len(true_targets),
                                  "dataset":[k[2]] * len(true_targets),
-                                 "interview_age": true_targets[:, 0],
-                                 "cbcl_scr_syn_anxdep_r": true_targets[:, 1],
-                                 "cbcl_scr_syn_withdep_r": true_targets[:, 2],
-                                 "cbcl_scr_syn_somatic_r": true_targets[:, 3],
-                                 "cbcl_scr_syn_social_r": true_targets[:, 4],
-                                 "cbcl_scr_syn_rulebreak_r": true_targets[:, 5],
-                                 "cbcl_scr_syn_aggressive_r": true_targets[:, 6],
-                                 "cbcl_scr_syn_thought_r": true_targets[:, 7],
-                                 "cbcl_scr_syn_attention_r": true_targets[:, 8],
-                                 "cbcl_scr_syn_internal_r": true_targets[:, 9],
-                                 "cbcl_scr_syn_external_r": true_targets[:, 10],
-                                 "cbcl_scr_syn_totprob_r": true_targets[:, 11]
+                                 "cbcl_scr_syn_thought_r": true_targets[:, 0],
+                                 "cbcl_scr_syn_internal_r": true_targets[:, 1],
+                                 "cbcl_scr_syn_external_r": true_targets[:, 2],
                                 })
-    predicted_targets = pd.DataFrame({"interview_age_pred": predicted_targets[:, 0],
-                                 "cbcl_scr_syn_anxdep_r_pred": predicted_targets[:, 1],
-                                 "cbcl_scr_syn_withdep_r_pred": predicted_targets[:, 2],
-                                 "cbcl_scr_syn_somatic_r_pred": predicted_targets[:, 3],
-                                 "cbcl_scr_syn_social_r_pred": predicted_targets[:, 4],
-                                 "cbcl_scr_syn_rulebreak_r_pred": predicted_targets[:, 5],
-                                 "cbcl_scr_syn_aggressive_r_pred": predicted_targets[:, 6],
-                                 "cbcl_scr_syn_thought_r_pred": predicted_targets[:, 7],
-                                 "cbcl_scr_syn_attention_r_pred": predicted_targets[:, 8],
-                                 "cbcl_scr_syn_internal_r_pred": predicted_targets[:, 9],
-                                 "cbcl_scr_syn_external_r_pred": predicted_targets[:, 10],
-                                 "cbcl_scr_syn_totprob_r_pred": predicted_targets[:, 11],
+    predicted_targets = pd.DataFrame({
+                                 "cbcl_scr_syn_thought_r_pred": predicted_targets[:, 0],
+                                 "cbcl_scr_syn_internal_r_pred": predicted_targets[:, 1],
+                                 "cbcl_scr_syn_external_r_pred": predicted_targets[:, 2],
                                 "indices": indices})
     pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
 pred_results = pd.concat(pred_results)
-pred_results.to_csv(f"results/multivariate/pred_results.csv", index=False)
+pred_results.to_csv(f"results/multivariate/abcd/pred_results.csv", index=False)
 
 prediction_mape_by_element = []
 for k, v in prediction_metrics.items():
@@ -777,28 +776,15 @@ for k, v in prediction_metrics.items():
         )
 
 df = pd.DataFrame(prediction_mape_by_element)
-#embeddings = pd.DataFrame(embeddings, columns = ["X", "y"])
-#loss  = pd.DataFrame(losses)
-#loss.to_csv(f"results/multivariate/loss_test_1_lr_000001.csv", index=True)
 df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
 df.columns = ['train_ratio',
               'experiment',
               'dataset',
-              'interview_age',
-              'cbcl_scr_syn_anxdep_r',
-              'cbcl_scr_syn_withdep_r',
-              'cbcl_scr_syn_somatic_r',
-               'cbcl_scr_syn_social_r',
-               'cbcl_scr_syn_rulebreak_r',
-               'cbcl_scr_syn_aggressive_r',
                'cbcl_scr_syn_thought_r',
-               'cbcl_scr_syn_attention_r',
                'cbcl_scr_syn_internal_r',
-               'cbcl_scr_syn_external_r',
-               'cbcl_scr_syn_totprob_r']
+               'cbcl_scr_syn_external_r']
 df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
-
-df.to_csv(f"results/multivariate/less_deep_decoding.csv", index=True)
+df.to_csv(f"results/multivariate/abcd/mape.csv", index = False)
 
 embedding_data = []
 for experiment_embedding in embeddings:
@@ -812,7 +798,7 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embeddings.csv", index=False)
+embedding_df.to_csv(f"results/multivariate/abcd/embeddings.csv", index=False)
 
 flat_losses = [df for sublist in losses for df in sublist]
 
@@ -820,9 +806,25 @@ flat_losses = [df for sublist in losses for df in sublist]
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/losses.csv"
+all_losses_file_path = "results/multivariate/abcd/losses.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
 
+#autoencoder_features_flat = autoencoder_features[0]
+#for auto_feat in autoencoder_features[1:]:
+#    autoencoder_features_flat.update(auto_feat)
+# autoencoder_features_flat = [item for sublist in autoencoder_features for item in sublist]  # Flatten the list of lists
 
+# # Convert to DataFrame (if necessary)
+# autoencoder_features_df = pd.DataFrame(autoencoder_features_flat, columns=["Original", "Reconstructed", "MSE"])
+
+# # Extract the arrays from DataFrame columns
+# original_array = np.array(autoencoder_features_df['Original'].tolist())
+# reconstructed_array = np.array(autoencoder_features_df['Reconstructed'].tolist())
+# mse_array = np.array(autoencoder_features_df['MSE'].tolist())
+
+# Save each array separately as .npy files
+# np.save("results/multivariate/original_residuals.npy", original_array)
+# np.save("results/multivariate/reconstructed_residuals.npy", reconstructed_array)
+# np.save("results/multivariate/mse_residuals.npy", mse_array)
