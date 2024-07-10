@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 import gc
 from collections import defaultdict
-from nilearn.connectome import sym_matrix_to_vec
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 # import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -378,7 +378,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, model=Non
     output_dim_target = 2
     output_dim_feat = 500
     
-    lr = 0.0001  # too low values return nan loss
+    lr = 0.01  # too low values return nan loss
 #     kernel = cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
@@ -624,8 +624,14 @@ class Experiment(submitit.helpers.Checkpointable):
                     X_embedded = model.transform_feat(X)
                     y_embedded = model.transform_targets(y)
                     X_emb = model.transfer_embedding(X_embedded)
-#                     y = y*std + mean
-                    y_pred = model.decode_target(model.transfer_embedding(X_embedded))# *std + mean
+                    y = y*std + mean
+                    y_pred = model.decode_target(model.transfer_embedding(X_embedded)) *std + mean
+                    if label == 'test' and train_ratio == 1.0:
+                        recon_mat = model.decode_feat(X_embedded).cpu().numpy()
+                        print("Recon_mat shape: ", recon_mat.shape)
+                        np.save(f'results/multivariate/abcd/recon_mat/recon_mat_exp{experiment}', recon_mat)
+
+
                     
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
@@ -668,15 +674,15 @@ if multi_gpu:
     log_folder = Path("log_folder")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
-        # timeout_min=120,
-        slurm_partition="prepost",
-        # gpus_per_node=1,
+        timeout_min=60,
+        slurm_account="ftj@a100",
+        # slurm_partition="prepost",
+        gpus_per_node=1,
         # tasks_per_node=1,
         # nodes=1,
-        # cpus_per_task=30
+        cpus_per_task=30,
         #slurm_qos="qos_gpu-t3",
-        #slurm_constraint="v100-32g",
-        #slurm_mem="10G",
+        slurm_constraint="a100",
         #slurm_additional_parameters={"requeue": True}
     )
     # srun -n 1  --verbose -A hjt@v100 -c 10 -C v100-32g   --gres=gpu:1 --time 5  python
