@@ -573,7 +573,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, model=Non
                 #decoding = model.decode_target(model.transfer_embedding(model.transform_feat(residual_features)))
                 #final_decoding = 1000*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), decoding)
 
-                loss = kernel_feature + feature_decoding + kernel_target + joint_embedding + target_decoding + final_decoding
+                loss = kernel_feature + feature_decoding + kernel_target + joint_embedding + target_decoding #+ final_decoding
                 loss.backward()
                 #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
