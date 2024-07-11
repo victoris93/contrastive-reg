@@ -476,7 +476,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
 
     num_epochs = 100
 
-    lr = 0.001  # too low values return nan loss
+    lr = 0.005  # too low values return nan loss
     kernel = multivariate_cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
@@ -572,7 +572,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
                 
                 ##FINAL DECODING
                 #decoding = model.decode_target(model.transfer_embedding(model.transform_feat(residual_features)))
-                decoding = model.decode_target(model.transfer_embedding(torch.tensor(sym_matrix_to_vec(model.encode_feat(features).detach().cpu().numpy(), discard_diagonal = True))))
+                decoding = model.decode_target(model.transfer_embedding(torch.tensor(sym_matrix_to_vec(model.encode_feat(features).detach().cpu().numpy(), discard_diagonal = True)).to(device)))
 
                 final_decoding = 100*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), decoding)
 
@@ -612,7 +612,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
                     targets = targets#*std - mean
                     out_feat = model.encode_feat(features)
                     out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True))
-                 
+
                     out_feat = out_feat.float().to(device)
                     
                     transfer_out_feat = model.transfer_embedding(out_feat)
@@ -631,7 +631,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
                     #    feat_dec = X_decoded[i, :]
                     #    original_feat = features[i,:]
                     #    mse_feats = nn.functional.mse_loss(original_feat, feat_dec)
-                     #   autoencoder_features.append((original_feat.cpu().numpy(), feat_dec.cpu().numpy(), mse_feats.cpu().numpy()))
+                    #   autoencoder_features.append((original_feat.cpu().numpy(), feat_dec.cpu().numpy(), mse_feats.cpu().numpy()))
 
                 validation.append(mae_batch.item())
             scheduler.step(mae_batch)
@@ -647,7 +647,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
             )
     loss_terms = pd.DataFrame(loss_terms)
     #print("loss_terms", loss_terms)
-    return loss_terms, model#, autoencoder_features
+    return loss_terms, model, autoencoder_features
 # %%
 def standardize(data, mean=None, std=None, epsilon = 1e-4):
     if mean is None:
@@ -744,7 +744,7 @@ class Experiment(submitit.helpers.Checkpointable):
             #test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, mean_train_features, B_init_fMRI, device=device)
+            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, mean_train_features, B_init_fMRI, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -856,7 +856,7 @@ else:
             
 
 # %%
-losses, predictions, embeddings = zip(*experiment_results)
+losses, predictions, embeddings, autoencoder_features = zip(*experiment_results)
 
 #print("predicitons", predictions)
 prediction_metrics = predictions[0]
@@ -921,7 +921,7 @@ for k, v in prediction_metrics.items():
     pred_results.append(pd.concat([true_targets_df, predicted_targets_df], axis=1))
 
 pred_results_df = pd.concat(pred_results)
-pred_results_df.to_csv(f"results/multivariate/test_001_3_fd_1.csv", index=False)
+pred_results_df.to_csv(f"results/multivariate/test_005_3_fd_1.csv", index=False)
 
 #embeddings = pd.DataFrame(embeddings, columns = ["X", "y"])
 #loss  = pd.DataFrame(losses)
@@ -946,7 +946,7 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embedding_test_001_3_fd_1.csv", index=False)
+embedding_df.to_csv(f"results/multivariate/embedding_test_005_3_fd_1.csv", index=False)
 
 
 flat_losses = [df for sublist in losses for df in sublist]
@@ -955,7 +955,7 @@ flat_losses = [df for sublist in losses for df in sublist]
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/loss_test_001_3_fd_1.csv"
+all_losses_file_path = "results/multivariate/loss_test_005_3_fd_1.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
