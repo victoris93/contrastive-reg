@@ -25,9 +25,11 @@ from augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
+import geomstats._backend as gs
+
 from geomstats.learning.optimization import RiemannianAdam
 #from geomstats.geometry.spd_matrices import SPDLogEuclideanMetric, SPDAffineMetric
-from pyriemann.utils.distance import distance_logeuclid, distance_riemann, distance_logdet
+#from pyriemann.utils.distance import distance_logeuclid, distance_riemann, distance_logdet
 
 
 #from pymanopt.manifolds import SymmetricPositiveDefinite
@@ -657,7 +659,7 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
 
                 validation.append(mape_batch)
             scheduler.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -4:
+            if np.log10(scheduler._last_lr[0]) < -4 and np.log10(scheduler_autoencoder._last_lr[0]) < -4:
                 break
 
 
@@ -666,6 +668,8 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                 f"| Loss {loss_terms[-1]['loss']:.02f} "
                 f"| val MAPE {validation[-1]:.02f}"
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
+                f"| log10 lr (autoencoder) {np.log10(scheduler_autoencoder._last_lr[0]):.2f}"
+
             )
     loss_terms = pd.DataFrame(loss_terms)
     #print("loss_terms", loss_terms)
