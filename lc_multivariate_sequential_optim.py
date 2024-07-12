@@ -25,6 +25,13 @@ from augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
+from geomstats.learning.optimization import RiemannianAdam
+#from geomstats.geometry.spd_matrices import SPDLogEuclideanMetric, SPDAffineMetric
+from pyriemann.utils.distance import distance_logeuclid, distance_riemann, distance_logdet
+
+
+#from pymanopt.manifolds import SymmetricPositiveDefinite
+#from pymanopt.solvers import RiemannianAdam
 
 torch.cuda.empty_cache()
 multi_gpu = False
@@ -54,73 +61,76 @@ class MLP(nn.Module):
         input_dim_target,
         hidden_dim_feat,
         hidden_dim_target,
-        hidden_dim_target_2,
-        hidden_dim_target_3,
-        hidden_dim_target_4,
-        output_dim,
+        output_dim_target,
+        output_dim_feat,
         dropout_rate,
     ):
         super(MLP, self).__init__()
+        
+        self.enc1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat,bias=False)
+        self.enc2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat,bias=False)
+        self.enc2.weight = torch.nn.Parameter(self.enc1.weight)
+        
+        self.dec1 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat,bias=False)
+        self.dec2 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat,bias=False)
+        self.dec1.weight = torch.nn.Parameter(self.enc1.weight.transpose(0,1))
+        self.dec2.weight = torch.nn.Parameter(self.dec1.weight)
 
-        self.feat_mlp = nn.Sequential(
-            nn.BatchNorm1d(input_dim_feat),
-            nn.Linear(input_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim),
-        )
-        self.init_weights(self.feat_mlp)
 
         # Xavier initialization for target MLP
         self.target_mlp = nn.Sequential(
             #nn.BatchNorm1d(input_dim_target),
-            nn.Linear(input_dim_target, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
+            nn.Linear(input_dim_target, hidden_dim_target),
+            nn.BatchNorm1d(hidden_dim_target),
+            nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim)
+            nn.Linear(hidden_dim_target, output_dim_target),
+            
         )
         self.init_weights(self.target_mlp)
 
         self.decode_target = nn.Sequential(
-            nn.Linear(output_dim, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
+            nn.Linear(output_dim_target, hidden_dim_target),
+            nn.BatchNorm1d(hidden_dim_target),
+            nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
-            nn.ReLU(),
-            nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, input_dim_target)
+            nn.Linear(hidden_dim_target, input_dim_target),
+            
         )
         self.init_weights(self.decode_target)
+        
+        self.feat_to_target_embedding = nn.Sequential(
+            nn.Linear(300, hidden_dim_feat),
+            nn.BatchNorm1d(hidden_dim_feat),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim_feat, 2),
+            
+            
+        )
+        self.init_weights(self.feat_to_target_embedding)
+        
+        #self.target_to_scalar = nn.Linear(input_dim_target, 1)
+        #self.scalar_to_target = nn.Linear(1, input_dim_target)
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
             nn.init.constant_(m.bias, 0.0)
+            
+    #def initialize_weights(self):
+        #nn.init.xavier_uniform_(self.enc1.weight)
 
-    def transform_feat(self, x):
-        features = self.feat_mlp(x)
-        features = nn.functional.normalize(features, p=2, dim=1)
-        return features
+    #def transform_feat(self, x):
+    #    features = self.feat_mlp(x)
+    #    features = nn.functional.normalize(features, p=2, dim=1)
+    #   return features
+    def encode_feat(self, x):
+        z_n = self.enc1(x)
+        c_hidd_fMRI = self.enc2(z_n.transpose(1,2))
+        return c_hidd_fMRI
+    
+    
     
     def transform_targets(self, y):
         targets = self.target_mlp(y)
@@ -129,9 +139,17 @@ class MLP(nn.Module):
 
     def decode_targets(self, embedding):
         return self.decode_target(embedding)
+    
+    def decode_feat(self,embedding):
+        z_n = (self.dec1(embedding)).transpose(1,2)
+        corr_n = (self.dec2(z_n))
+        return corr_n
+    
+    def transfer_embedding(self, embedding):
+        return self.feat_to_target_embedding(embedding)
 
     def forward(self, x, y):
-        x_embedding = self.transform_feat(x)
+        x_embedding = self.encode_feat(x)
         y_embedding = self.transform_targets(y)
         return x_embedding, y_embedding
 
@@ -427,20 +445,19 @@ def multivariate_cauchy(x, krnl_sigma):
 # %%
 
 def train(train_dataset, test_dataset, mean, std, model=None, device=device, kernel=cauchy, num_epochs=100, batch_size=32):
-    input_dim_feat = 4950
-    # the rest is arbitrary
-    hidden_dim_feat = 1000
-    hidden_dim_target =10
-    hidden_dim_target_2 = 100
-    hidden_dim_target_3 =1000
-    hidden_dim_target_4 = 10000
+    input_dim_feat = 100
     input_dim_target = 20
-    output_dim = 2
+    # the rest is arbitrary
+    hidden_dim_feat = 500
+    
+    hidden_dim_target = 10
+    output_dim_target = 2
+    output_dim_feat = 25
     
 
-    num_epochs = 100
+    num_epochs = 50
 
-    lr = 0.0001  # too low values return nan loss
+    lr = 0.001  # too low values return nan loss
     kernel = multivariate_cauchy
     batch_size = 32  # too low values return nan loss
     dropout_rate = 0
@@ -457,11 +474,9 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             input_dim_target,
             hidden_dim_feat,
             hidden_dim_target,
-            hidden_dim_target_2,
-            hidden_dim_target_3,
-            hidden_dim_target_4,
-            output_dim,
-            dropout_rate=dropout_rate,
+            output_dim_target,
+            output_dim_feat,
+            dropout_rate,
         ).to(device)
 
     criterion_pft = KernelizedSupCon(
@@ -470,15 +485,22 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
     criterion_ptt = KernelizedSupCon(
         method="expw", temperature=0.01, base_temperature=0.01, kernel=kernel, krnl_sigma=1/50
     )
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1)
+    riemannian_params = list(model.enc1.parameters()) + list(model.enc2.parameters()) + list(model.dec1.parameters()) + list(model.dec2.parameters())
+    model_params = [param for name, param in model.named_parameters() if name not in riemannian_params]
+
+    optimizer_autoencoder = RiemannianAdam(riemannian_params, lr = lr, weight_decay = weight_decay)
+    scheduler_autoencoder = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder, factor=0.1)
+    
+    optimizer_model = optim.Adam(model_params, lr=lr, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_model, factor=0.1)
     
     
     
 
     loss_terms = []
     validation = []
-    
+    autoencoder_features = []
+    eye = torch.eye(100, device = device)
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -487,72 +509,114 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
-                
                 bsz = targets.shape[0]
-                n_views = features.shape[1]
+                n_views = 1#features.shape[1]
                 n_feat = features.shape[-1]
                 
-                optimizer.zero_grad()
-                for param in model.decode_target.parameters():
-                    param.requires_grad = False
+                optimizer_autoencoder.zero_grad()
+                
+                for param in riemannian_params:
+                    param.requires_grad = True
             
-                for param in model.feat_mlp.parameters():
-                    param.requires_grad = True
+                for param in model_params:
+                    param.requires_grad = False
                 
-                for param in model.target_mlp.parameters():
-                    param.requires_grad = True
                 
-                features = features.view(bsz * n_views, n_feat)
-                
+                #features = features.view(bsz * n_views, n_feat)
                 features = features.to(device)
                 targets = targets.to(device)
+                #features = B_init_fMRI.T@features@B_init_fMRI
+                ##IF RESIDUAL
+                #mean_features = mean_train_features.expand(int(features.shape[0]), -1)
+                #residual_features = features - mean_features
                 
-                out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
+                ##FEATURE AUTOENCODER
+                embedded_feat = model.encode_feat(features)
                 
-                out_feat_squeezed = out_feat.squeeze()
-                joint_embedding = 100 * nn.functional.cosine_embedding_loss(out_feat_squeezed, out_target, torch.ones(out_feat_squeezed.shape[0]).to(device))
+                reconstructed_feat = model.decode_feat(embedded_feat)
                 
-                out_feat = torch.split(out_feat, [bsz]*n_views, dim=0)
-                out_feat = torch.cat([f.unsqueeze(1) for f in out_feat], dim=1)
-                kernel_feature = criterion_pft(out_feat, targets)
+                reconstructed_feat_diag = reconstructed_feat*(1-eye)+eye
+                #feature_autoencoder = nn.functional.mse_loss(features, reconstructed_feat)
+                feature_autoencoder = torch.tensor(distance_logeuclid(features.detach().cpu().numpy(), reconstructed_feat_diag.detach().cpu().numpy())).to(device)
+                feature_autoencoder = torch.mean(feature_autoencoder)
+                loss_terms_batch['feature_autoencoder'] += feature_autoencoder.item() / len(train_loader)
                 
-                #out_target_decoded = model.decode_target(out_target)              
+                feature_autoencoder.backward()
+                optimizer_autoencoder.step()
+                optimizer_model.zero_grad()
+                for param in riemannian_params:
+                    param.requires_grad = False
+            
+                for param in model_params:
+                    param.requires_grad = True
+                
+                #feature_autoencoder = nn.functional.mse_loss(features, reconstructed_feat)
+                #loss_terms_batch['feature_autoencoder'] += feature_autoencoder.item() / len(train_loader)
+
+                #feature_autoencoder.backward()
+                #optimizer_feature_autoencoder.step()
+                
+                #optimizer.zero_grad()
+            
+                ##JOINT EMBEDDING
+                embedded_feat_vectorized = torch.tensor(sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True))
+                #embedded_feat_vectorized = torch.tensor(sym_matrix_to_vec(features.detach().cpu().numpy(), discard_diagonal = True))
+                embedded_feat_vectorized = embedded_feat_vectorized.to(device)
+                transfer_embedded_feat_vectorized = model.transfer_embedding(embedded_feat_vectorized)
+                out_target = model.transform_targets(torch.cat(n_views*[targets], dim=0))
+                #_, out_target = model(features, torch.cat(n_views*[targets], dim=0))
+                #residual_out_feat, out_target = model(residual_features, torch.cat(n_views*[targets], dim=0))
+                #residual_out_feat_reduced = model.transfer_embedding(residual_out_feat)
+                #joint_embedding = 100 * nn.functional.cosine_embedding_loss(residual_out_feat_reduced, out_target, torch.ones(residual_out_feat_reduced.shape[0]).to(device))
+                joint_embedding = 100 * nn.functional.cosine_embedding_loss(transfer_embedded_feat_vectorized, out_target, torch.ones(out_target.shape[0]).to(device))
+                
+                ##FINAL DECODING
+                #decoding = model.decode_target(model.transfer_embedding(model.transform_feat(residual_features)))
+                decoding = model.decode_target(transfer_embedded_feat_vectorized)
+                
+                final_decoding = 100*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), decoding)
+                #epsilon = 1e-8
+                #final_decoding=  torch.mean(torch.abs((targets - decoding)) / torch.abs((targets + epsilon))) * 100
+                
+                ##TRANSFER EMBEDDED FEATURES
+                transfer_embedded_feat_vectorized = torch.split(transfer_embedded_feat_vectorized, bsz*n_views, dim=0)#[bsz]*n_views
+                transfer_embedded_feat_vectorized = torch.cat([f.unsqueeze(1) for f in transfer_embedded_feat_vectorized], dim=1)
+                kernel_embedded_feature = criterion_pft(transfer_embedded_feat_vectorized, targets)
+                
+                ##KERNEL TARGET
+                out_target_decoded = model.decode_target(out_target)               
                 out_target = torch.split(out_target, [bsz]*n_views, dim=0)
                 out_target = torch.cat([f.unsqueeze(1) for f in out_target], dim=1)
                 kernel_target = criterion_ptt(out_target, targets)
                 
-                loss_terms_batch['kernel_feature'] += kernel_feature.item() / len(train_loader)
+                ##TARGET DECODING
+                target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
+                
+                
+                
+
+                loss = kernel_embedded_feature + kernel_target + joint_embedding + target_decoding + final_decoding
+                #loss = final_decoding
+                loss.backward()
+                #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer_model.step()
+                
+                #for name, param in model.named_parameters():
+                #    if param.grad is not None:
+                #        print(f'{name}: {param.grad.abs().mean()}')
+                
+
+                loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                loss_terms_batch['kernel_embedded_feature'] += kernel_embedded_feature.item() / len(train_loader)
                 loss_terms_batch['kernel_target'] += kernel_target.item() / len(train_loader)
                 loss_terms_batch['joint_embedding'] += joint_embedding.item() / len(train_loader)
-                
-                loss_embeddings = kernel_feature+ kernel_target + joint_embedding
-                loss_embeddings.backward()
-            
-                for param in model.decode_target.parameters():
-                    param.requires_grad = True
-            
-                for param in model.feat_mlp.parameters():
-                    param.requires_grad = False
-                
-                for param in model.target_mlp.parameters():
-                    param.requires_grad = False
-                
-                out_feat, out_target = model(features, torch.cat(n_views*[targets], dim=0))
-                out_target_decoded = model.decode_target(out_target)              
-                target_decoding = 10*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), out_target_decoded)
                 loss_terms_batch['target_decoding'] += target_decoding.item() / len(train_loader)
-
-                target_decoding.backward()
-                optimizer.step()
-                
-                loss = loss_embeddings + target_decoding 
-                loss_terms_batch['loss'] += loss.item()/len(train_loader)
-                
+                loss_terms_batch['final_decoding'] += final_decoding.item() / len(train_loader)
             loss_terms_batch['epoch'] = epoch
             loss_terms.append(loss_terms_batch)
 
             model.eval()
-            mae_batch = 0
+            mape_batch = 0
             with torch.no_grad():
                 for (features, targets) in test_loader:
                     bsz = targets.shape[0]
@@ -561,19 +625,38 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
                     
                     if len(features.shape) > 2:
                         n_views = features.shape[1]
-                        features = features.view(bsz * n_views, n_feat)
+                        #features = features.view(bsz * n_views, n_feat)
                     features, targets = features.to(device), targets.to(device)
-                    targets = targets*std - mean
-                    
-                    out_feat = model.transform_feat(features)
-                    
-                    out_target_decoded = model.decode_target(out_feat)
-                    out_target_decoded = out_target_decoded*std-mean
-                    
+                    targets = targets#*std - mean
+                    out_feat_1 = model.encode_feat(features)
+                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat_1.detach().cpu().numpy(), discard_diagonal = True))
 
-                    mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
-                validation.append(mae_batch.item())
-            scheduler.step(mae_batch)
+                    out_feat = out_feat.float().to(device)
+                    
+                    transfer_out_feat = model.transfer_embedding(out_feat)
+                    
+                    out_target_decoded = model.decode_target(transfer_out_feat)
+                    #out_target_decoded_1 = out_target_decoded*std-mean
+                    #mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
+                    epsilon = 1e-8
+                    mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
+                    mape_batch+=mape.item()
+                    #Save X and X_decoded in the list
+                    #mean_features = mean_train_features.expand(int(features.shape[0]),-1)
+                    #residual_features = features - mean_features
+                    #X_residual_embedded = model.encode_feat(residual_features)
+                    #X_residual_decoded = model.decode_feat(X_residual_embedded)
+                    #X_decoded = X_residual_decoded + mean_features
+                    X_decoded = model.decode_feat(out_feat_1)
+                    
+                    for i in range(X_decoded.shape[0]):
+                        feat_dec = X_decoded[i, :]
+                        original_feat = features[i,:]
+                        mse_feats = nn.functional.mse_loss(original_feat, feat_dec)
+                        autoencoder_features.append((original_feat.cpu().numpy(), feat_dec.cpu().numpy(), mse_feats.cpu().numpy()))
+
+                validation.append(mape_batch)
+            scheduler.step(mape_batch)
             if np.log10(scheduler._last_lr[0]) < -4:
                 break
 
@@ -581,12 +664,12 @@ def train(train_dataset, test_dataset, mean, std, model=None, device=device, ker
             pbar.set_postfix_str(
                 f"Epoch {epoch} "
                 f"| Loss {loss_terms[-1]['loss']:.02f} "
-                f"| val MAE {validation[-1]:.02f}"
+                f"| val MAPE {validation[-1]:.02f}"
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
             )
     loss_terms = pd.DataFrame(loss_terms)
-    print("loss_terms", loss_terms)
-    return loss_terms, model
+    #print("loss_terms", loss_terms)
+    return loss_terms, model, autoencoder_features
 # %%
 def standardize(data, mean=None, std=None, epsilon = 1e-4):
     if mean is None:
@@ -619,6 +702,7 @@ class Experiment(submitit.helpers.Checkpointable):
 
             # print("Data loaded", flush=True)
             predictions = {}
+            autoencoder_features = {}
             losses = []
             self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
 
@@ -630,6 +714,15 @@ class Experiment(submitit.helpers.Checkpointable):
             train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
             train_targets, mean, std= standardize(train_targets)
+            
+            ## Weight initialization for bilinear layer
+            input_dim_feat =100
+            output_dim_feat = 25
+            mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
+            [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
+            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
+            #B_init_fMRI = torch.nn.functional.normalize(B_init_fMRI, p=2, dim=0)
+            #print(torch.max(B_init_fMRI))
             
             
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
@@ -660,15 +753,22 @@ class Experiment(submitit.helpers.Checkpointable):
 
                 train_features = new_train_features
                 train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
-            else:
-                train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                train_features = np.expand_dims(train_features, axis = 1)
+            #else:
+                
+                #train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+                #train_features = np.expand_dims(train_features, axis = 1)
+            
+            
+            torch_train_feat = torch.tensor(train_features)
+            mean_train_features = torch.mean(torch_train_feat, dim=0).to(device)
+            #[D,V] = torch.linalg.eigh(mean_train_features,UPLO = "U")     
+            #B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
             
             train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
-            test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
+            #test_features = sym_matrix_to_vec(test_features, discard_diagonal=True)
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, device=device)
+            loss_terms, model, autoencoder_features = train(train_dataset, test_dataset,mean, std, mean_train_features, B_init_fMRI, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -678,25 +778,32 @@ class Experiment(submitit.helpers.Checkpointable):
                 train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
                 train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
                 train_targets,_,_ = standardize(train_targets)
-                train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
+                #train_targets = (train_targets-mean)/std
+                #train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     X, y = zip(*d)
                     X = torch.stack(X).to(device)
                     y = torch.stack(y).to(device)
-                    X_embedded = model.transform_feat(X)
+                    #X = X - mean_train_features.expand(int(X.shape[0]), -1)
+                    
+                    X_embedded = model.encode_feat(X)
                     y_embedded = model.transform_targets(y)
-                    y = y*std + mean
-                    y_pred = model.decode_target(X_embedded)*std + mean
+                    X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded.detach().cpu().numpy(), discard_diagonal = True))
+                    X_embedded = X_embedded.float().to(device)
+                    X_emb = model.transfer_embedding(X_embedded)
+                    #y = y*std + mean
+                    y_pred = model.decode_target(X_emb)#*std + mean
+                    
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
                             'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_embedded[i].cpu().numpy()
+                            'feature_embedded': X_emb[i].cpu().numpy()
                         })
                     
-            self.results = (losses, predictions, self.embeddings)
+            self.results = (losses, predictions, self.embeddings, autoencoder_features)
             
         if path:
             self.save(path)
@@ -712,8 +819,8 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 # %%
-path_feat = "/storage/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
-path_target = "/storage/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
+path_feat = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
+path_target = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
 random_state = np.random.RandomState(seed=42)
 dataset = MatData(path_feat, path_target, threshold=THRESHOLD,
     selected_regions = SELECTED_REGIONS, function_to_use = FUNCTION)
@@ -721,7 +828,7 @@ n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
-experiments = 20
+experiments = 5
 
 # %% ## Training
 if multi_gpu:
@@ -773,59 +880,83 @@ else:
             
 
 # %%
-losses, predictions, embeddings = zip(*experiment_results)
+losses, predictions, embeddings, autoencoder_features = zip(*experiment_results)
 
 #print("predicitons", predictions)
 prediction_metrics = predictions[0]
 for prediction in predictions[1:]:
     prediction_metrics.update(prediction)
-prediction_mape_by_element = []
+pred_results= []
 for k, v in prediction_metrics.items():
     true_targets, predicted_targets, indices = v
     
-    mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
+    #mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
     
-    for i, mape in enumerate(mape_by_element):
-        prediction_mape_by_element.append(
-            {
-                'train_ratio': k[0],
-                'experiment': k[1],
-                'dataset': k[2],
-                'mape': mape
-            }
-        )
+    true_targets_df = pd.DataFrame({
+        'train_ratio': [k[0]] * len(true_targets),
+        'experiment': [k[1]] * len(true_targets),
+        'dataset': [k[2]] * len(true_targets),
+        'BentonFaces_total_true': true_targets[:, 0],
+        'Cattell_total_true': true_targets[:, 1],
+        'EkmanEmHex_pca1_true': true_targets[:, 2],
+        'EkmanEmHex_pca1_expv_true': true_targets[:, 3],
+        'FamousFaces_details_true': true_targets[:, 4],
+        'Hotel_time_true': true_targets[:, 5],
+        'PicturePriming_baseline_acc_true': true_targets[:, 6],
+        'PicturePriming_baseline_rt_true': true_targets[:, 7],
+        'PicturePriming_priming_prime_true': true_targets[:, 8],
+        'PicturePriming_priming_target_true': true_targets[:, 9],
+        'Proverbs_true': true_targets[:, 10],
+        'RTchoice_true': true_targets[:, 11],
+        'RTsimple_true': true_targets[:, 12],
+        'Synsem_prop_error_true': true_targets[:, 13],
+        'Synsem_RT_true': true_targets[:, 14],
+        'TOT_true': true_targets[:, 15],
+        'VSTMcolour_K_mean_true': true_targets[:, 16],
+        'VSTMcolour_K_precision_true': true_targets[:, 17],
+        'VSTMcolour_K_doubt_true': true_targets[:, 18],
+        'VSTMcolour_MSE_true': true_targets[:, 19],
+    })
 
-df = pd.DataFrame(prediction_mape_by_element)
+    predicted_targets_df = pd.DataFrame({
+        'BentonFaces_total_pred': predicted_targets[:, 0],
+        'Cattell_total_pred': predicted_targets[:, 1],
+        'EkmanEmHex_pca1_pred': predicted_targets[:, 2],
+        'EkmanEmHex_pca1_expv_pred': predicted_targets[:, 3],
+        'FamousFaces_details_pred': predicted_targets[:, 4],
+        'Hotel_time_pred': predicted_targets[:, 5],
+        'PicturePriming_baseline_acc_pred': predicted_targets[:, 6],
+        'PicturePriming_baseline_rt_pred': predicted_targets[:, 7],
+        'PicturePriming_priming_prime_pred': predicted_targets[:, 8],
+        'PicturePriming_priming_target_pred': predicted_targets[:, 9],
+        'Proverbs_pred': predicted_targets[:, 10],
+        'RTchoice_pred': predicted_targets[:, 11],
+        'RTsimple_pred': predicted_targets[:, 12],
+        'Synsem_prop_error_pred': predicted_targets[:, 13],
+        'Synsem_RT_pred': predicted_targets[:, 14],
+        'TOT_pred': predicted_targets[:, 15],
+        'VSTMcolour_K_mean_pred': predicted_targets[:, 16],
+        'VSTMcolour_K_precision_pred': predicted_targets[:, 17],
+        'VSTMcolour_K_doubt_pred': predicted_targets[:, 18],
+        'VSTMcolour_MSE_pred': predicted_targets[:, 19],
+        'indices': indices
+    })
+
+    pred_results.append(pd.concat([true_targets_df, predicted_targets_df], axis=1))
+
+pred_results_df = pd.concat(pred_results)
+pred_results_df.to_csv(f"results/multivariate/seq_opt_riemann.csv", index=False)
+
 #embeddings = pd.DataFrame(embeddings, columns = ["X", "y"])
 #loss  = pd.DataFrame(losses)
 #loss.to_csv(f"results/multivariate/loss_test_1_lr_000001.csv", index=True)
-df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-df.columns = ['train_ratio', 'experiment', 'dataset', 
-'BentonFaces_total',
-'Cattell_total',
-'EkmanEmHex_pca1',
-'EkmanEmHex_pca1_expv',
-'FamousFaces_details',
-'Hotel_time',
-'PicturePriming_baseline_acc',
-'PicturePriming_baseline_rt',
-'PicturePriming_priming_prime',
-'PicturePriming_priming_target',
-"Proverbs",
-'RTchoice',
-'RTsimple',
-"Synsem_prop_error",
-'Synsem_RT',
-"TOT",
-'VSTMcolour_K_mean',
-'VSTMcolour_K_precision',
-'VSTMcolour_K_doubt',
-'VSTMcolour_MSE']
-df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
+#df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
+
+#df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
 
 #embeddings.to_csv(f"results/multivariate/embeddings_test_1", index=True)
 
-df.to_csv(f"results/multivariate/less_deep_decoding.csv", index=True)
+#df.to_csv(f"results/multivariate/lin_target.csv", index = False)
 
 embedding_data = []
 for experiment_embedding in embeddings:
@@ -839,7 +970,7 @@ for experiment_embedding in embeddings:
             })
 
 embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/embedding_less_deep_decoding.csv", index=False)
+#embedding_df.to_csv(f"results/multivariate/embedding_new_test_0_00001_3_fd_1_clip_less_params.csv", index=False)
 
 
 flat_losses = [df for sublist in losses for df in sublist]
@@ -848,8 +979,24 @@ flat_losses = [df for sublist in losses for df in sublist]
 all_losses_df = pd.concat(flat_losses, ignore_index=True)
 
 # Define the file path for saving the concatenated DataFrame
-all_losses_file_path = "results/multivariate/loss_less_deep_decoding.csv"
+all_losses_file_path = "results/multivariate/seq_opt_riemann.csv"
 
 # Save concatenated DataFrame to CSV
 all_losses_df.to_csv(all_losses_file_path, index=False)
+
+
+#autoencoder_features_flat = [item for sublist in autoencoder_features for item in sublist]  # Flatten the list of lists
+
+# Convert to DataFrame (if necessary)
+#autoencoder_features_df = pd.DataFrame(autoencoder_features_flat, columns=["Original", "Reconstructed", "MSE"])
+
+# Extract the arrays from DataFrame columns
+#original_array = np.array(autoencoder_features_df['Original'].tolist())
+#reconstructed_array = np.array(autoencoder_features_df['Reconstructed'].tolist())
+#mse_array = np.array(autoencoder_features_df['MSE'].tolist())
+#
+# Save each array separately as .npy files
+#np.save("results/multivariate/original_dsouza_clip.npy", original_array)
+#np.save("results/multivariate/reconstructed_dsouza_clip.npy", reconstructed_array)
+#np.save("results/multivariate/mse_dsouza_clip.npy", mse_array)
 # %%
