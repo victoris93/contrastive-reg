@@ -634,7 +634,7 @@ def train(train_dataset, test_dataset, mean, std, mean_train_features, B_init_fM
                 
                 ##FINAL DECODING
                 #decoding = model.decode_target(model.transfer_embedding(model.transform_feat(residual_features)))
-                decoding = model.decode_target(transfer_embedded_feat_vectorized)
+                decoding = model.decode_target(target_pred)
                 
                 final_decoding = 100*nn.functional.mse_loss(torch.cat(n_views*[targets], dim=0), decoding)
                 #epsilon = 1e-8
