@@ -746,14 +746,14 @@ if multi_gpu:
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
         timeout_min=60,
-        # slurm_account="ftj@a100",
-        slurm_partition="prepost",
-        # gpus_per_node=1,
-        # tasks_per_node=1,
-        # nodes=1,
+        slurm_account="ftj@a100",
+        # slurm_partition="prepost",
+        gpus_per_node=1,
+        tasks_per_node=1,
+        nodes=1,
         cpus_per_task=30,
         #slurm_qos="qos_gpu-t3",
-        # slurm_constraint="a100",
+        slurm_constraint="a100",
         #slurm_mem="10G",
         #slurm_additional_parameters={"requeue": True}
     )
