@@ -31,13 +31,12 @@ from geomstats.geometry.spd_matrices import SPDLogEuclideanMetric, SPDAffineMetr
 import pyriemann
 
 torch.cuda.empty_cache()
-multi_gpu = False
+multi_gpu = True
 
 fmri_data_path = '/gpfs3/well/margulies/projects/ABCD/fmriresults01/abcd-mproc-release5'
 
 # THRESHOLD = float(sys.argv[1])
 THRESHOLD = 0
-SELECTED_REGIONS = None #[b'7Networks_RH_Vis_2', b'7Networks_LH_DorsAttn_Post_1']
 FUNCTION = None #'deactivate_selected_regions'
 AUGMENTATION = None
 
@@ -50,10 +49,12 @@ class LogEuclideanLoss(nn.Module):
     def mat_batch_log(self, features):
         """Compute the matrix logarithm of a batch of SPD matrices."""
         
-        eye = torch.eye(features.size(-1)).to(features.device)
         Eigvals, Eigvecs = torch.linalg.eigh(features)
+        Eigvals = torch.clamp(Eigvals, min=1e-6)
         log_eigvals = torch.diag_embed(torch.log(Eigvals))
         matmul1 = torch.matmul(log_eigvals, Eigvecs.transpose(-2, -1))
+
+        
         matmul2 = torch.matmul(Eigvecs, matmul1)
         return matmul2
 
@@ -71,7 +72,6 @@ class LogEuclideanLoss(nn.Module):
         device = features.device
         eye = torch.eye(features.size(-1), device=device)
         recon_features_diag = recon_features*(1-eye)+eye
-        
         
         log_features = self.mat_batch_log(features)
         log_recon_features = self.mat_batch_log(recon_features_diag)
@@ -153,10 +153,13 @@ class MLP(nn.Module):
     def decode_feat(self,c_hidd_mat):
         z_n = self.dec_mat1(c_hidd_mat).transpose(1,2)
         recon_mat = self.dec_mat2(z_n)
-        recon_mat_sym = torch.stack([(mat + mat.transpose(0,1))/2 for mat in recon_mat])
-        for mat in recon_mat_sym:
-            print(torch.all(mat == mat.transpose(0,1)))
-        return recon_mat_sym
+        recon_mat = torch.round(recon_mat, decimals = 3)
+#         recon_mat_sym = torch.stack([(mat + mat.transpose(0,1))/2 for mat in recon_mat])
+#         for mat in recon_mat_sym:
+#             print(torch.all(mat == mat.transpose(0,1)))
+#             if not torch.all(mat == mat.transpose(0,1)):
+#                 np.save(f"debug/asym_{recon_mat_sym.size(0)}", recon_mat_sym.detach().cpu().numpy())
+        return recon_mat
     
     def transform_targets(self, y):
         targets = self.target_mlp(y)
@@ -417,11 +420,11 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
     model.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
 
     criterion_pft = KernelizedSupCon(
-        method="expw", temperature=5, base_temperature=8, kernel=kernel, krnl_sigma=1
+        method="expw", temperature=5, base_temperature=5, kernel=kernel, krnl_sigma=1
     ).to(device)
     
     criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=5, base_temperature=8, kernel=kernel, krnl_sigma=1
+        method="expw", temperature=5, base_temperature=5, kernel=kernel, krnl_sigma=1
     ).to(device)
     
     ae_criterion = LogEuclideanLoss().to(device)
@@ -472,9 +475,12 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
                 feature_autoencoder_loss = ae_criterion(features, reconstructed_feat)
                 loss_terms_batch['feature_autoencoder_loss'] += feature_autoencoder_loss.mean().item() / len(train_loader)
             
+#                 print(f"Epoch {epoch} | AE Loss: {feature_autoencoder_loss}")
                 feature_autoencoder_loss.backward()
+#                 print(f"Epoch {epoch} | AE Loss: {feature_autoencoder_loss}")
                 optimizer_autoencoder.step()
                 optimizer_model.zero_grad()
+                
                 for param in riemannian_params:
                     param.requires_grad = False
             
@@ -566,13 +572,16 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
                 validation.append(mape_batch)
             
             scheduler.step(mape_batch)
+            scheduler_autoencoder.step(mape_batch)
             if np.log10(scheduler._last_lr[0]) < -4 and np.log10(scheduler_autoencoder._last_lr[0])  < -4:
                 break
 
 
             pbar.set_postfix_str(
                 f"Epoch {epoch} "
-                f"| Loss {loss_terms[-1]['loss']:.02f} "
+                f"| AE Loss {loss_terms[-1]['feature_autoencoder_loss']:.02f} "
+                f"| SupCon Feat Loss {loss_terms[-1]['kernel_embedded_feature_loss']:.02f} "
+                f"| SupCon Target Loss {loss_terms[-1]['kernel_embedded_target_loss']:.02f} "
                 f"| val MAPE {validation[-1]:.02f}"
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
                 f"| log10 lr (autoencoder) {np.log10(scheduler_autoencoder._last_lr[0]):.2f}"
@@ -676,11 +685,11 @@ class Experiment(submitit.helpers.Checkpointable):
             model.eval()
             with torch.no_grad():
                 train_dataset = Subset(dataset, train_indices)
-                train_features = train_dataset.dataset.matrices[train_dataset.indices]
-                train_targets = train_dataset.dataset.target[train_dataset.indices]
+                train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
+                train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
                 train_targets,_,_ = standardize(train_targets)
                 # train_features = np.array([sym_matrix_to_vec(i, discard_diagonal=True) for i in train_features])
-                train_dataset = TensorDataset(train_features, train_targets)
+                train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     X, y = zip(*d)
                     X = torch.stack(X).to(device)
@@ -690,6 +699,7 @@ class Experiment(submitit.helpers.Checkpointable):
                                         
                     if label == 'test':
                         recon_mat = model.decode_feat(X_embedded)
+                        np.save(f'results/multivariate/abcd/recon_mat/recon_mat{experiment}', recon_mat.cpu().numpy())
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         mean_mape_mat = torch.mean(mape_mat, dim=0).cpu().numpy()
                         np.save(f'results/multivariate/abcd/recon_mat/mean_mape_mat{experiment}_train-ratio{train_ratio}', mean_mape_mat)
@@ -725,7 +735,7 @@ class Experiment(submitit.helpers.Checkpointable):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
-random_state = np.random.RandomState(seed=42)
+random_state = np.random.RandomState(seed=24)
 
 dataset_path = "ABCD/abcd_dataset_400parcels.nc"
 dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
@@ -735,9 +745,7 @@ n_sub = len(dataset)
 test_ratio = .2
 test_size = int(test_ratio * n_sub)
 indices = np.arange(n_sub)
-experiments = 1
-
-dataset.matrices.shape
+experiments = 20
 
 if multi_gpu:
     log_folder = Path("log_folder")
@@ -856,3 +864,13 @@ for experiment_embedding in embeddings:
 
 embedding_df = pd.DataFrame(embedding_data)
 embedding_df.to_csv(f"results/multivariate/abcd/embeddings.csv", index=False)
+
+flat_losses = [df for sublist in losses for df in sublist]
+# Concatenate all DataFrames into one single DataFrame
+all_losses_df = pd.concat(flat_losses, ignore_index=True)
+# Define the file path for saving the concatenated DataFrame
+all_losses_file_path = "results/multivariate/abcd/losses.csv"
+# Save concatenated DataFrame to CSV
+all_losses_df.to_csv(all_losses_file_path, index=False)
+
+
