@@ -133,8 +133,8 @@ def mean_correlation(y_true, y_pred):
 def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 400, batch_size = 32):
     input_dim_feat = 100
     output_dim_feat = 25
-    lr = 0.0001
-    weight_decay = 0
+    lr = 0.001
+    weight_decay = 0.001
     lambda_0 = 1
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -147,8 +147,8 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             B_init_fMRI,
         ).to(device)
         
-    #model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    #model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
     ae_criterion = LogEuclideanLoss().to(device)
     optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
@@ -173,6 +173,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                 train_mape = mean_absolute_percentage_error(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
