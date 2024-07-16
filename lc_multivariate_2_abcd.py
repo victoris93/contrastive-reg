@@ -392,7 +392,7 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
     
     
     output_dim_target = 2
-    output_dim_feat = 25
+    output_dim_feat = 70
     
     lr = 0.001  # too low values return nan loss
 
@@ -433,10 +433,10 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
     model_params = [param for name, param in model.named_parameters() if name not in riemannian_param_names]
     
 
-    optimizer_autoencoder = RiemannianAdam(riemannian_params, lr = lr, weight_decay = weight_decay)
-    scheduler_autoencoder = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder, factor=0.1)
+#     optimizer_autoencoder = RiemannianAdam(riemannian_params, lr = lr, weight_decay = weight_decay)
+#     scheduler_autoencoder = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder, factor=0.1)
     
-    optimizer_model = optim.Adam(model_params, lr=lr, weight_decay=weight_decay)
+    optimizer = optim.Adam(model_params, lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_model, factor=0.1)
 
 
@@ -452,14 +452,15 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
+                optimizer.zero_grad()
                 
-                optimizer_autoencoder.zero_grad()
+#                 optimizer_autoencoder.zero_grad()
                 
-                for param in riemannian_params:
-                    param.requires_grad = True
+#                 for param in riemannian_params:
+#                     param.requires_grad = True
             
-                for param in model_params:
-                    param.requires_grad = False
+#                 for param in model_params:
+#                     param.requires_grad = False
 
                 features = features.to(device)
                 targets = targets.to(device)
@@ -471,21 +472,22 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
                 reconstructed_feat = model.decode_feat(embedded_feat)
 #                 reconstructed_feat_diag = reconstructed_feat*(1-eye)+eye
                 ## FEATURE DECODING LOSS
-#                 feature_autoencoder_loss = nn.functional.mse_loss(features, reconstructed_feat)
                 feature_autoencoder_loss = ae_criterion(features, reconstructed_feat)
+
+#                 feature_autoencoder_loss = nn.functional.mse_loss(features, reconstructed_feat)
                 loss_terms_batch['feature_autoencoder_loss'] += feature_autoencoder_loss.mean().item() / len(train_loader)
             
 #                 print(f"Epoch {epoch} | AE Loss: {feature_autoencoder_loss}")
-                feature_autoencoder_loss.backward()
+#                 feature_autoencoder_loss.backward()
 #                 print(f"Epoch {epoch} | AE Loss: {feature_autoencoder_loss}")
-                optimizer_autoencoder.step()
-                optimizer_model.zero_grad()
+#                 optimizer_autoencoder.step()
+#                 optimizer_model.zero_grad()
                 
-                for param in riemannian_params:
-                    param.requires_grad = False
+#                 for param in riemannian_params:
+#                     param.requires_grad = False
             
-                for param in model_params:
-                    param.requires_grad = True
+#                 for param in model_params:
+#                     param.requires_grad = True
 
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
@@ -530,15 +532,16 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
 
                 ## SUM ALL LOSSES
                 # feature_autoencoder_loss +
-                LOSS = (kernel_embedded_feature_loss +
-                              kernel_embedded_target_loss +
-                              joint_embedding_loss +
-                              target_decoding_loss +
-                              target_decoding_from_reduced_emb_loss)
+                LOSS = (feature_autoencoder_loss+
+                        kernel_embedded_feature_loss +
+                        kernel_embedded_target_loss +
+                        joint_embedding_loss +
+                        target_decoding_loss +
+                        target_decoding_from_reduced_emb_loss)
         
                 LOSS.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer_model.step()
+                optimizer.step()
 
 
                 loss_terms_batch['loss'] += LOSS.item() / len(train_loader)
@@ -572,8 +575,8 @@ def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, devic
                 validation.append(mape_batch)
             
             scheduler.step(mape_batch)
-            scheduler_autoencoder.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -4 and np.log10(scheduler_autoencoder._last_lr[0])  < -4:
+#             scheduler_autoencoder.step(mape_batch)
+            if np.log10(scheduler._last_lr[0]) < -4:
                 break
 
 
@@ -636,7 +639,7 @@ class Experiment(submitit.helpers.Checkpointable):
 
             ## Weight initialization for bilinear layer
             input_dim_feat =400
-            output_dim_feat = 25
+            output_dim_feat = 70
             mean_f = torch.mean(train_features, dim=0).to(device)
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
@@ -699,7 +702,7 @@ class Experiment(submitit.helpers.Checkpointable):
                                         
                     if label == 'test':
                         recon_mat = model.decode_feat(X_embedded)
-                        np.save(f'results/multivariate/abcd/recon_mat/recon_mat{experiment}', recon_mat.cpu().numpy())
+                        np.save(f'results/multivariate/abcd/recon_mat/recon_mat{experiment}_train-ratio{train_ratio}', recon_mat.cpu().numpy())
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         mean_mape_mat = torch.mean(mape_mat, dim=0).cpu().numpy()
                         np.save(f'results/multivariate/abcd/recon_mat/mean_mape_mat{experiment}_train-ratio{train_ratio}', mean_mape_mat)
