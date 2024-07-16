@@ -210,25 +210,27 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
 path_feat = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
 path_target = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"
 dataset = MatData(path_feat, path_target)
-train_val_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
-train_val_dataset = Subset(dataset, train_val_idx)
+train_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
+train_dataset = Subset(dataset, train_idx)
 test_dataset = Subset(dataset, test_idx)
 
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
-# %%
-input_dim_feat=100
-output_dim_feat=25
-train_features = dataset.matrices
+input_dim_feat = 100
+output_dim_feat = 25
+train_features = dataset.matrices[train_idx]
 mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
-[D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
-B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
+[D, V] = torch.linalg.eigh(mean_f, UPLO="U")
+B_init_fMRI = V[:, input_dim_feat - output_dim_feat:]
+
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
 # %%
-for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
+for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
     print(f"Fold {fold + 1}")
-    train_dataset = Subset(train_val_dataset, train_idx)
-    val_dataset = Subset(train_val_dataset, val_idx)
+    train_data = Subset(train_dataset, train_val_idx)
+    val_data = Subset(train_dataset, val_idx)
     
-    loss_terms, trained_weights = train_autoencoder(train_dataset, val_dataset, B_init_fMRI)
+    # Train autoencoder
+    loss_terms, trained_weights = train_autoencoder(train_data, val_data, B_init_fMRI)
     
     # Save fold results
     #with open(f"results/fold_{fold + 1}_loss_terms.pkl", "wb") as f:
