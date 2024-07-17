@@ -74,7 +74,8 @@ class AutoEncoder(nn.Module):
         self,
         input_dim_feat,
         output_dim_feat,
-        B_init_fMRI
+        B_init_fMRI,
+        dropout_rate
     ):
         super(AutoEncoder, self).__init__()
         
@@ -86,8 +87,9 @@ class AutoEncoder(nn.Module):
         self.dec2 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat,bias=False)
         self.dec1.weight = torch.nn.Parameter(self.enc1.weight.transpose(0,1))
         self.dec2.weight = torch.nn.Parameter(self.dec1.weight)
-        
-        
+        self.dropout = nn.Dropout(p=dropout_rate)
+        #self.elu = nn.ELU()
+        #self.alpha = nn.Parameter(torch.ones(1))
     def encode_feat(self, x):
         z_n = self.enc1(x)
         c_hidd_fMRI = self.enc2(z_n.transpose(1,2))
@@ -95,7 +97,8 @@ class AutoEncoder(nn.Module):
     
     def decode_feat(self,embedding):
         z_n = (self.dec1(embedding)).transpose(1,2)
-        corr_n = (self.dec2(z_n))
+        #corr_n = self.alpha*self.dropout((self.dec2(z_n)))
+        corr_n = self.dec2(z_n)
         return corr_n
 # %%
 class MatData(Dataset):
@@ -120,6 +123,36 @@ def mean_absolute_percentage_error(y_true, y_pred):
     eps = 1e-6
     return torch.mean(torch.abs((y_true - y_pred)) / torch.abs(y_true)+eps) * 100
 
+def mape_between_subjects(y_true, y_pred):
+        eps = 1e-6
+        mapes = []
+        y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+        y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+        
+        num_subjects = y_true.shape[0]
+        matrix_size = y_true.shape[1]
+        
+        # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
+        upper_true = []
+        upper_pred = []
+        
+        for subj in range(num_subjects):
+            for i in range(matrix_size):
+                for j in range(i + 1, matrix_size):
+                    true_val = y_true[subj, i, j]
+                    pred_val = y_pred[subj, i, j]
+                    
+                    # Add epsilon to denominator to avoid division by zero
+                    mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
+                    upper_true.append(true_val)
+                    upper_pred.append(pred_val)
+                    mapes.append(mape)
+        
+        # Calculate mean MAPE
+        mean_mape = np.mean(mapes)
+        
+        return mean_mape
+
 def mean_correlation(y_true, y_pred):
     correlations = []
     y_true = y_true.cpu().detach().numpy()
@@ -129,13 +162,38 @@ def mean_correlation(y_true, y_pred):
         correlations.append(corr)
     return np.mean(correlations)
 
+def mean_correlations_between_subjects(y_true, y_pred):
+    correlations = []
+    y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+    y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+    
+    num_subjects = y_true.shape[0]
+    matrix_size = y_true.shape[1]
+    
+    # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
+    upper_true = []
+    upper_pred = []
+    
+    for subj in range(num_subjects):
+        for i in range(matrix_size):
+            for j in range(i + 1, matrix_size):
+                upper_true.append(y_true[subj, i, j])
+                upper_pred.append(y_pred[subj, i, j])
+    
+    # Calculate Spearman correlation
+    spearman_corr, _ = spearmanr(upper_true, upper_pred)
+    correlations.append(spearman_corr)
+    correlation = np.mean(correlations)
+    
+    return correlation
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 400, batch_size = 32):
     input_dim_feat = 100
-    output_dim_feat = 25
+    output_dim_feat = 15
     lr = 0.001
-    weight_decay = 0.001
+    weight_decay = 0
     lambda_0 = 1
+    dropout_rate = 0
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -145,6 +203,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             input_dim_feat,
             output_dim_feat,
             B_init_fMRI,
+            dropout_rate
         ).to(device)
         
     model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
@@ -163,25 +222,27 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             for features, targets in train_loader:
                 
                 features = features.to(device)
-                targets = targets.to(device)
                 
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
                 
                 loss =  recon_loss + lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
-                train_mean_corr = mean_correlation(features, reconstructed_feat)
-                train_mape = mean_absolute_percentage_error(features, reconstructed_feat)
+                train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
+                train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
-            model.eval()
-            val_loss = 0
-            val_mean_corr = 0
-            val_mape = 0
-            with torch.no_grad():
+                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
+                loss_terms.append((loss.item(), train_mean_corr, train_mape))
+
+    model.eval()
+    val_loss = 0
+    val_mean_corr = 0
+    val_mape = 0
+    with torch.no_grad():
                     for features, targets in val_loader:
                         features = features.to(device)
                         targets = targets.to(device)
@@ -192,15 +253,15 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                         #loss = ae_criterion(features, reconstructed_feat)
                         val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)#
 
-                        val_mean_corr += mean_correlation(features, reconstructed_feat)
-                        val_mape += mean_absolute_percentage_error(features, reconstructed_feat).item()
+                        val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+                        val_mape += mape_between_subjects(features, reconstructed_feat).item()
 
-            val_loss /= len(val_loader)
-            val_mean_corr /= len(val_loader)
-            val_mape /= len(val_loader)
+    val_loss /= len(val_loader)
+    val_mean_corr /= len(val_loader)
+    val_mape /= len(val_loader)
 
-            pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}|Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f}")
-            loss_terms.append((loss, val_loss, val_mean_corr, val_mape))
+    print(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
+    loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
 
     model_weights = model.state_dict()
     torch.save(model_weights, "weights/autoencoder_weights.pth")
@@ -215,7 +276,8 @@ train_dataset = Subset(dataset, train_idx)
 test_dataset = Subset(dataset, test_idx)
 
 input_dim_feat = 100
-output_dim_feat = 25
+output_dim_feat = 15
+dropout_rate = 0.5
 train_features = dataset.matrices[train_idx]
 mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
 [D, V] = torch.linalg.eigh(mean_f, UPLO="U")
@@ -239,7 +301,7 @@ for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
 
 # Evaluate on the test set
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-model = AutoEncoder(input_dim_feat, output_dim_feat, B_init_fMRI).to(device)
+model = AutoEncoder(input_dim_feat, output_dim_feat, B_init_fMRI, dropout_rate).to(device)
 model.load_state_dict(torch.load("weights/autoencoder_weights_fold_1.pth"))  # Load the best fold weights
 
 model.eval()
@@ -250,18 +312,26 @@ test_mape = 0
 with torch.no_grad():
     for features, targets in test_loader:
         features = features.to(device)
-        targets = targets.to(device)
+        
+        
         
         embedded_feat = model.encode_feat(features)
         reconstructed_feat = model.decode_feat(embedded_feat)
         
         test_loss += LogEuclideanLoss()(features, reconstructed_feat)
-        test_mean_corr += mean_correlation(features, reconstructed_feat)
-        test_mape += mean_absolute_percentage_error(features, reconstructed_feat).item()
+        test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+        test_mape += mape_between_subjects(features, reconstructed_feat).item()
 
 test_loss /= len(test_loader)
 test_mean_corr /= len(test_loader)
 test_mape /= len(test_loader)
+
+original_matrices = np.concatenate(features, axis=0)
+reconstructed_matrices = np.concatenate(reconstructed_feat, axis=0)
+
+# Save original and reconstructed matrices
+np.save("original_matrices.npy", original_matrices)
+np.save("reconstructed_matrices.npy", reconstructed_matrices)
 
 print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
 
