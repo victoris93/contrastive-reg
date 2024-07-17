@@ -1,4 +1,3 @@
-# %%
 import math
 import xarray as xr
 import asyncio
@@ -31,7 +30,7 @@ from geoopt.optim import RiemannianAdam
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 multi_gpu = True
-# %%
+
 class LogEuclideanLoss(nn.Module):
     def __init__(self):
         super(LogEuclideanLoss, self).__init__()
@@ -69,7 +68,6 @@ class LogEuclideanLoss(nn.Module):
         loss = torch.norm(log_features - log_recon_features, dim=(-2, -1)).mean()
         return loss
 
-# %%
 class AutoEncoder(nn.Module):
     def __init__(
         self,
@@ -108,7 +106,7 @@ class AutoEncoder(nn.Module):
 #             if not torch.all(mat == mat.transpose(0,1)):
 #                 np.save(f"debug/asym_{recon_mat_sym.size(0)}", recon_mat_sym.detach().cpu().numpy())
         return recon_mat
-# %%
+
 class MatData(Dataset):
     def __init__(self, dataset_path, target_names, threshold=0):
         if not isinstance(target_names, list):
@@ -142,10 +140,44 @@ class MatData(Dataset):
         
         return matrix, target
 
-# %%
+
+
 def mean_absolute_percentage_error(y_true, y_pred):
     eps = 1e-6
     return torch.mean(torch.abs((y_true - y_pred)) / torch.abs(y_true)+eps) * 100
+
+
+
+def mape_between_subjects(y_true, y_pred):
+        eps = 1e-6
+        mapes = []
+        y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+        y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+        
+        num_subjects = y_true.shape[0]
+        matrix_size = y_true.shape[1]
+        
+        # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
+        upper_true = []
+        upper_pred = []
+        
+        for subj in range(num_subjects):
+            for i in range(matrix_size):
+                for j in range(i + 1, matrix_size):
+                    true_val = y_true[subj, i, j]
+                    pred_val = y_pred[subj, i, j]
+                    
+                    # Add epsilon to denominator to avoid division by zero
+                    mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
+                    upper_true.append(true_val)
+                    upper_pred.append(pred_val)
+                    mapes.append(mape)
+        
+        # Calculate mean MAPE
+        mean_mape = np.mean(mapes)
+        
+        return mean_mape
+
 
 def mean_correlation(y_true, y_pred):
     correlations = []
@@ -156,8 +188,46 @@ def mean_correlation(y_true, y_pred):
         correlations.append(corr)
     return np.mean(correlations)
 
+
+
+def mean_correlations_between_subjects(y_true, y_pred):
+    correlations = []
+    y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+    y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+    
+    num_subjects = y_true.shape[0]
+    matrix_size = y_true.shape[1]
+    
+    # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
+    upper_true = []
+    upper_pred = []
+    
+    for subj in range(num_subjects):
+        for i in range(matrix_size):
+            for j in range(i + 1, matrix_size):
+                upper_true.append(y_true[subj, i, j])
+                upper_pred.append(y_pred[subj, i, j])
+    
+    # Calculate Spearman correlation
+    spearman_corr, _ = spearmanr(upper_true, upper_pred)
+    correlations.append(spearman_corr)
+    correlation = np.mean(correlations)
+    
+    return correlation
+
+
+def mean_correlation(y_true, y_pred):
+    correlations = []
+    y_true = y_true.cpu().detach().numpy()
+    y_pred = y_pred.cpu().detach().numpy()
+    for i in range(y_true.shape[0]):
+        corr, _ = spearmanr(y_true[i].flatten(), y_pred[i].flatten())
+        correlations.append(corr)
+    return np.mean(correlations)
+
+
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, model=None, device = device, num_epochs = 400, batch_size = 32):
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, model=None, device = device, num_epochs = 150, batch_size = 32):
     input_dim_feat = 400
     output_dim_feat = 50
     lr = 0.001
@@ -192,19 +262,23 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
             for features, targets in train_loader:
                 
                 features = features.to(device)
-                targets = targets.to(device)
                 
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
                 
                 loss =  recon_loss + lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
-                train_mean_corr = mean_correlation(features, reconstructed_feat)
-                train_mape = mean_absolute_percentage_error(features, reconstructed_feat)
+                train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
+                train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
+                loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
+                loss_terms.append((loss.item(), train_mean_corr, train_mape))
                 # loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                
             model.eval()
             val_loss = 0
             val_mean_corr = 0
@@ -220,8 +294,8 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
                     #loss = ae_criterion(features, reconstructed_feat)
                     val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)#
 
-                    val_mean_corr += mean_correlation(features, reconstructed_feat)
-                    val_mape += mean_absolute_percentage_error(features, reconstructed_feat).item()
+                    val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+                    val_mape += mape_between_subjects(features, reconstructed_feat).item()
 
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
@@ -235,7 +309,6 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
     model_weights = model.state_dict()
     return loss_terms, model_weights, (val_mape, val_loss, val_mean_corr)
 
-# %%
 dataset_path = "ABCD/abcd_dataset_400parcels.nc"
 dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
                            'cbcl_scr_syn_internal_r',
@@ -245,7 +318,7 @@ train_val_dataset = Subset(dataset, train_val_idx)
 test_dataset = Subset(dataset, test_idx)
 
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
-# %%
+
 class FoldTrain(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
@@ -286,7 +359,6 @@ class FoldTrain(submitit.helpers.Checkpointable):
         def save(self, path: Path):
             with open(path, "wb") as o:
                 pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
-
 
 if multi_gpu:
     log_folder = Path("log_folder")
@@ -360,11 +432,13 @@ with torch.no_grad():
         np.save(f'results/autoencoder/recon_mat/mean_mape_mat{fold}_batch_{i+1}', mean_mape_mat)
         
         test_loss += lambda_0*torch.norm((features-reconstructed_feat))**2
-        test_mean_corr += mean_correlation(features, reconstructed_feat)
-        test_mape += mean_absolute_percentage_error(features, reconstructed_feat).item()
+        test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+        test_mape += mape_between_subjects(features, reconstructed_feat).item()
 
 test_loss /= len(test_loader)
 test_mean_corr /= len(test_loader)
 test_mape /= len(test_loader)
 
 print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
+
+
