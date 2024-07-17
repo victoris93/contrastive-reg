@@ -187,7 +187,7 @@ def mean_correlations_between_subjects(y_true, y_pred):
     
     return correlation
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 400, batch_size = 32):
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 100, batch_size = 32):
     input_dim_feat = 100
     output_dim_feat = 15
     lr = 0.001
@@ -277,7 +277,7 @@ test_dataset = Subset(dataset, test_idx)
 
 input_dim_feat = 100
 output_dim_feat = 15
-dropout_rate = 0.5
+dropout_rate = 0
 train_features = dataset.matrices[train_idx]
 mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
 [D, V] = torch.linalg.eigh(mean_f, UPLO="U")
