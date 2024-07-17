@@ -19,13 +19,20 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.model_selection import (
     train_test_split, KFold
 )
-from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset, ConcatDataset
 from tqdm.auto import tqdm
 from augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
+from geoopt.manifolds import SymmetricPositiveDefinite, Stiefel
+from scipy.linalg import pinv, diagsvd
+from sklearn.utils.extmath import randomized_svd
+
+#spd_manifold = SymmetricPositiveDefinite()
+
+
 
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,11 +89,15 @@ class AutoEncoder(nn.Module):
         self.enc1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat,bias=False)
         self.enc2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat,bias=False)
         self.enc2.weight = torch.nn.Parameter(self.enc1.weight)
+        #self.enc1.weight = nn.Parameter(self.init_spd_weights((B_init_fMRI.shape[1], B_init_fMRI.shape[0])))
+        #self.enc2.weight = nn.Parameter(self.enc1.weight.clone())
         
         self.dec1 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat,bias=False)
         self.dec2 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat,bias=False)
         self.dec1.weight = torch.nn.Parameter(self.enc1.weight.transpose(0,1))
         self.dec2.weight = torch.nn.Parameter(self.dec1.weight)
+        #self.dec1.weight = nn.Parameter(self.enc1.weight.transpose(0, 1))
+        #self.dec2.weight = nn.Parameter(self.dec1.weight.clone())
         self.dropout = nn.Dropout(p=dropout_rate)
         #self.elu = nn.ELU()
         #self.alpha = nn.Parameter(torch.ones(1))
@@ -97,18 +108,23 @@ class AutoEncoder(nn.Module):
     
     def decode_feat(self,embedding):
         z_n = (self.dec1(embedding)).transpose(1,2)
-        #corr_n = self.alpha*self.dropout((self.dec2(z_n)))
+        #corr_n = self.alpha*(self.dec2(z_n))
         corr_n = self.dec2(z_n)
         return corr_n
+    
 # %%
 class MatData(Dataset):
-    def __init__(self, path_feat, path_targets):
-        self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
-        self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-        self.target = torch.tensor(pd.read_csv(path_targets).drop(columns=["Subject", "Unnamed: 0",
-        'CardioMeasures_pulse_mean',
-        'CardioMeasures_bp_sys_mean',
-        'CardioMeasures_bp_dia_mean']).to_numpy(), dtype=torch.float32)
+    def __init__(self, path_feat, path_targets, load = True):
+        if load == True:
+            self.matrices = np.load(path_feat, mmap_mode="r").astype(np.float32)
+            self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
+            self.target = torch.tensor(pd.read_csv(path_targets).drop(columns=["Subject", "Unnamed: 0",
+                    'CardioMeasures_pulse_mean',
+                    'CardioMeasures_bp_sys_mean',
+                    'CardioMeasures_bp_dia_mean']).to_numpy(), dtype=torch.float32)        
+        else : 
+            self.matrices = torch.from_numpy(path_feat).to(torch.float32)
+            self.target = torch.from_numpy(path_targets).to(torch.float32)
 
     def __len__(self):
         return len(self.matrices)
@@ -143,12 +159,10 @@ def mape_between_subjects(y_true, y_pred):
                     pred_val = y_pred[subj, i, j]
                     
                     # Add epsilon to denominator to avoid division by zero
-                    mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
+                    mape = (np.abs((true_val - pred_val)) / np.abs(true_val) + eps) * 100.0
                     upper_true.append(true_val)
                     upper_pred.append(pred_val)
                     mapes.append(mape)
-        
-        # Calculate mean MAPE
         mean_mape = np.mean(mapes)
         
         return mean_mape
@@ -186,12 +200,36 @@ def mean_correlations_between_subjects(y_true, y_pred):
     correlation = np.mean(correlations)
     
     return correlation
+
+def reconstruct_with_noise(X, noise_level):
+    #first_sample = X.dataset[X.indices[0]][0]  # Extract the matrix part
+    reconstructed_matrix = []
+    for i in range(len(X)):
+        #sample = X.dataset[X.indices[i]]
+        #X_i = sample[0].numpy()
+    # Step 1: Compute the pseudo inverse
+        
+        # Step 2: Perform randomized SVD (Singular Value Decomposition)
+        U, sigma, Vt = np.linalg.svd(X[i])
+        
+        # Step 3: Add noise to sigma
+        sigma_noise = sigma + noise_level * np.random.normal(len(sigma))
+        recon = U@np.diag(sigma_noise)@Vt
+        # Step 4: Reconstruct the original matrix
+        reconstructed_matrix.append(recon)
+    reconstructed_matrix = np.stack(reconstructed_matrix, axis=0)    
+    #reconstructed_matrix = torch.from_numpy(reconstructed_matrix).to(torch.float32).to(device)
+    
+    return reconstructed_matrix
+
+
+
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 100, batch_size = 32):
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 400, batch_size = 32):
     input_dim_feat = 100
     output_dim_feat = 15
-    lr = 0.001
-    weight_decay = 0
+    lr = 0.0001
+    weight_decay = 0.001
     lambda_0 = 1
     dropout_rate = 0
     
@@ -206,9 +244,10 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             dropout_rate
         ).to(device)
         
-    model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    #model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    #model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
+
     ae_criterion = LogEuclideanLoss().to(device)
     optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer_autoencoder, 100, 0.5, last_epoch=-1)
@@ -222,21 +261,29 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             for features, targets in train_loader:
                 
                 features = features.to(device)
+                #feature_aug = SVD_augmentation(features, 15, 10, 0.01)
                 
+                
+                
+                
+                eye = torch.eye(features.size(-1), device=device)
                 embedded_feat = model.encode_feat(features)
-                reconstructed_feat = model.decode_feat(embedded_feat)
+                reconstructed_feat = model.decode_feat(embedded_feat)*(1-eye)+eye
+                #embedded_feat_aug = model.encode_feat(feature_aug)
+                #econstructed_feat_aug = model.decode_feat(embedded_feat_aug)
                 
-                loss =  recon_loss + lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
-                train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
-                train_mape = mape_between_subjects(features, reconstructed_feat)
+                loss =  recon_loss + lambda_0*(torch.norm((features-reconstructed_feat))**2)#+torch.norm((feature_aug-reconstructed_feat_aug))**2)#ae_criterion(features, reconstructed_feat)
+                #train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
+                #train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
+                #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
-                loss_terms.append((loss.item(), train_mean_corr, train_mape))
+                #pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
+                #loss_terms.append((loss.item(), train_mean_corr, train_mape))
+                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f}")
 
     model.eval()
     val_loss = 0
@@ -246,26 +293,38 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                     for features, targets in val_loader:
                         features = features.to(device)
                         targets = targets.to(device)
+                        eye = torch.eye(features.size(-1), device=device)
+
+                        #print("features",features[0])
+                        print("feat mean", features.mean().item())
+                        print("feat std", features.std().item())
+                        
 
                         embedded_feat = model.encode_feat(features)
-                        reconstructed_feat = model.decode_feat(embedded_feat)
-
+                        reconstructed_feat = model.decode_feat(embedded_feat)*(1-eye)+eye
+                        #print("reconstructed",reconstructed_feat[0])
+                        print("reconstructed mean", reconstructed_feat.mean().item())
+                        print("reconstructed std", reconstructed_feat.std().item())
+                        
                         #loss = ae_criterion(features, reconstructed_feat)
-                        val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)#
+                        val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
 
                         val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                         val_mape += mape_between_subjects(features, reconstructed_feat).item()
+                        print(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
+
 
     val_loss /= len(val_loader)
     val_mean_corr /= len(val_loader)
     val_mape /= len(val_loader)
 
-    print(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
     loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
 
     model_weights = model.state_dict()
     torch.save(model_weights, "weights/autoencoder_weights.pth")
     return loss_terms, model_weights
+
+
 
 # %%
 path_feat = "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"
@@ -279,7 +338,7 @@ input_dim_feat = 100
 output_dim_feat = 15
 dropout_rate = 0
 train_features = dataset.matrices[train_idx]
-mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
+mean_f = torch.mean(train_features, dim=0).to(device)
 [D, V] = torch.linalg.eigh(mean_f, UPLO="U")
 B_init_fMRI = V[:, input_dim_feat - output_dim_feat:]
 
@@ -289,10 +348,21 @@ kf = KFold(n_splits=5, shuffle=True, random_state=42)
 for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
     print(f"Fold {fold + 1}")
     train_data = Subset(train_dataset, train_val_idx)
+    train_features = torch.stack([train_data[i][0] for i in range(len(train_data))]).numpy()
+    train_targets = torch.stack([train_data[i][1] for i in range(len(train_data))])
+    augmented_matrices = reconstruct_with_noise(train_features, 0.000001)
+    augmented_matrices_2 = reconstruct_with_noise(train_features, 0.0000001)
+
+    combined_matrices = np.concatenate([train_features, augmented_matrices])
+    combined_matrices_2 = np.concatenate([combined_matrices, augmented_matrices_2])
+    combined_targets = np.concatenate([train_targets, train_targets]) 
+    combined_targets_2 = np.concatenate([combined_targets, train_targets])# Duplicate targets for augmented data
+    train_data_full = MatData(combined_matrices_2, combined_targets_2, load = False)
+
     val_data = Subset(train_dataset, val_idx)
     
     # Train autoencoder
-    loss_terms, trained_weights = train_autoencoder(train_data, val_data, B_init_fMRI)
+    loss_terms, trained_weights = train_autoencoder(train_data_full, val_data, B_init_fMRI)
     
     # Save fold results
     #with open(f"results/fold_{fold + 1}_loss_terms.pkl", "wb") as f:
