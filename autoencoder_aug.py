@@ -29,6 +29,8 @@ from geoopt.optim import RiemannianAdam
 from geoopt.manifolds import SymmetricPositiveDefinite, Stiefel
 from scipy.linalg import pinv, diagsvd
 from sklearn.utils.extmath import randomized_svd
+from torch.utils.tensorboard import SummaryWriter
+
 
 #spd_manifold = SymmetricPositiveDefinite()
 
@@ -253,6 +255,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer_autoencoder, 100, 0.5, last_epoch=-1)
     loss_terms = []
     model.train()
+    writer = SummaryWriter(log_dir="tensorboard/autoencoder")
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             optimizer_autoencoder.zero_grad()
@@ -280,6 +283,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                 #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
+                writer.add_scalar('Loss/train', loss.item(), epoch)
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 #pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
                 #loss_terms.append((loss.item(), train_mean_corr, train_mape))
@@ -319,6 +323,10 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     val_mean_corr /= len(val_loader)
     val_mape /= len(val_loader)
 
+    writer.add_scalar('Loss/val', val_loss.item(), epoch)
+    writer.add_scalar('Metric/val_mean_corr', val_mean_corr, epoch)
+    writer.add_scalar('Metric/val_mape', val_mape, epoch)
+    
     loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
     tqdm.write(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
     
@@ -330,7 +338,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     if best_weights is not None:
         model.load_state_dict(best_weights)
     torch.save(model.state_dict(), "weights/autoencoder_weights.pth")
-
+    writer.close() 
     return loss_terms, model.state_dict(), val_loss.item()
 
 
@@ -422,8 +430,8 @@ original_matrices = np.concatenate(original_matrices, axis=0)
 reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
 
 # Save original and reconstructed matrices
-np.save("results/autoencoder/original_matrices_alpha.npy", original_matrices)
-np.save("results/autoencoder/reconstructed_matrices_alpha.npy", reconstructed_matrices)
+np.save("results/autoencoder/original_100.npy", original_matrices)
+np.save("results/autoencoder/reconstructed_100.npy", reconstructed_matrices)
 
 print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
 
