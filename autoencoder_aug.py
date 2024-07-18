@@ -227,8 +227,8 @@ def reconstruct_with_noise(X, noise_level):
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = 400, batch_size = 32):
     input_dim_feat = 100
-    output_dim_feat = 15
-    lr = 0.0001
+    output_dim_feat = 25
+    lr = 0.001
     weight_decay = 0.001
     lambda_0 = 1
     dropout_rate = 0
@@ -249,7 +249,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     
 
     ae_criterion = LogEuclideanLoss().to(device)
-    optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer_autoencoder, 100, 0.5, last_epoch=-1)
     loss_terms = []
     model.train()
@@ -272,7 +272,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                 #embedded_feat_aug = model.encode_feat(feature_aug)
                 #econstructed_feat_aug = model.decode_feat(embedded_feat_aug)
                 
-                loss =  recon_loss + lambda_0*(torch.norm((features-reconstructed_feat))**2)#+torch.norm((feature_aug-reconstructed_feat_aug))**2)#ae_criterion(features, reconstructed_feat)
+                loss =  recon_loss + lambda_0*ae_criterion(features, reconstructed_feat)#+torch.norm((feature_aug-reconstructed_feat_aug))**2)#ae_criterion(features, reconstructed_feat)
                 #train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
                 #train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
@@ -289,6 +289,8 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     val_loss = 0
     val_mean_corr = 0
     val_mape = 0
+    best_val_loss = 1e10
+    best_weights = None
     with torch.no_grad():
                     for features, targets in val_loader:
                         features = features.to(device)
@@ -308,22 +310,28 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                         
                         #loss = ae_criterion(features, reconstructed_feat)
                         val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
-
                         val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                         val_mape += mape_between_subjects(features, reconstructed_feat).item()
                         print(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
-
+                    
 
     val_loss /= len(val_loader)
     val_mean_corr /= len(val_loader)
     val_mape /= len(val_loader)
 
     loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
+    tqdm.write(f"Validation Loss: {val_loss:.02f} | Validation Mean Corr: {val_mean_corr:.02f} | Validation MAPE: {val_mape:.02f}")
+    
+    # Save best model weights
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_weights = model.state_dict()
 
-    model_weights = model.state_dict()
-    torch.save(model_weights, "weights/autoencoder_weights.pth")
-    return loss_terms, model_weights
+    if best_weights is not None:
+        model.load_state_dict(best_weights)
+    torch.save(model.state_dict(), "weights/autoencoder_weights.pth")
 
+    return loss_terms, model.state_dict(), val_loss.item()
 
 
 # %%
@@ -335,7 +343,7 @@ train_dataset = Subset(dataset, train_idx)
 test_dataset = Subset(dataset, test_idx)
 
 input_dim_feat = 100
-output_dim_feat = 15
+output_dim_feat = 25
 dropout_rate = 0
 train_features = dataset.matrices[train_idx]
 mean_f = torch.mean(train_features, dim=0).to(device)
@@ -343,52 +351,63 @@ mean_f = torch.mean(train_features, dim=0).to(device)
 B_init_fMRI = V[:, input_dim_feat - output_dim_feat:]
 
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
+fold_models = []
+all_mape = []
+all_corr = []
 
 # %%
+best_val_loss = 1e10
 for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
     print(f"Fold {fold + 1}")
     train_data = Subset(train_dataset, train_val_idx)
-    train_features = torch.stack([train_data[i][0] for i in range(len(train_data))]).numpy()
-    train_targets = torch.stack([train_data[i][1] for i in range(len(train_data))])
-    augmented_matrices = reconstruct_with_noise(train_features, 0.000001)
-    augmented_matrices_2 = reconstruct_with_noise(train_features, 0.0000001)
+    #train_features = torch.stack([train_data[i][0] for i in range(len(train_data))]).numpy()
+    #train_targets = torch.stack([train_data[i][1] for i in range(len(train_data))])
+    #augmented_matrices = reconstruct_with_noise(train_features, 0.000001)
+    #augmented_matrices_2 = reconstruct_with_noise(train_features, 0.0000001)
 
-    combined_matrices = np.concatenate([train_features, augmented_matrices])
-    combined_matrices_2 = np.concatenate([combined_matrices, augmented_matrices_2])
-    combined_targets = np.concatenate([train_targets, train_targets]) 
-    combined_targets_2 = np.concatenate([combined_targets, train_targets])# Duplicate targets for augmented data
-    train_data_full = MatData(combined_matrices_2, combined_targets_2, load = False)
+    #combined_matrices = np.concatenate([train_features, augmented_matrices])
+    #combined_matrices_2 = np.concatenate([combined_matrices, augmented_matrices_2])
+    #combined_targets = np.concatenate([train_targets, train_targets]) 
+    #combined_targets_2 = np.concatenate([combined_targets, train_targets])# Duplicate targets for augmented data
+    #train_data_full = MatData(combined_matrices_2, combined_targets_2, load = False)
 
     val_data = Subset(train_dataset, val_idx)
     
     # Train autoencoder
-    loss_terms, trained_weights = train_autoencoder(train_data_full, val_data, B_init_fMRI)
+    loss_terms, trained_weights, val_loss = train_autoencoder(train_data, val_data, B_init_fMRI)
     
-    # Save fold results
-    #with open(f"results/fold_{fold + 1}_loss_terms.pkl", "wb") as f:
-        #pickle.dump(loss_terms, f)
-    #torch.save(trained_weights, f"weights/autoencoder_weights_fold_{fold + 1}.pth")
+    with open(f"results/autoencoder/fold_{fold + 1}_loss_terms.pkl", "wb") as f:
+        pickle.dump(loss_terms, f)
+    torch.save(trained_weights, f"weights/autoencoder_weights_fold_{fold + 1}.pth")
 
-# Evaluate on the test set
+    # Update best fold based on validation loss
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_fold = fold + 1
+# %%
+# Evaluate on the test set using the best fold
+print(f"Loading weights from fold {best_fold} with lowest validation loss {best_val_loss:.02f}")
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 model = AutoEncoder(input_dim_feat, output_dim_feat, B_init_fMRI, dropout_rate).to(device)
-model.load_state_dict(torch.load("weights/autoencoder_weights_fold_1.pth"))  # Load the best fold weights
+model.load_state_dict(torch.load(f"weights/autoencoder_weights_fold_{best_fold}.pth"))  
 
 model.eval()
 test_loss = 0
 test_mean_corr = 0
 test_mape = 0
+lambda_0 = 1
+original_matrices = []
+reconstructed_matrices = []
+ae_criterion = LogEuclideanLoss().to(device)
 
 with torch.no_grad():
     for features, targets in test_loader:
         features = features.to(device)
-        
-        
-        
         embedded_feat = model.encode_feat(features)
         reconstructed_feat = model.decode_feat(embedded_feat)
-        
-        test_loss += LogEuclideanLoss()(features, reconstructed_feat)
+        original_matrices.append(features.cpu().numpy())
+        reconstructed_matrices.append(reconstructed_feat.cpu().numpy())
+        test_loss += lambda_0*ae_criterion(features, reconstructed_feat)
         test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
         test_mape += mape_between_subjects(features, reconstructed_feat).item()
 
@@ -396,12 +415,12 @@ test_loss /= len(test_loader)
 test_mean_corr /= len(test_loader)
 test_mape /= len(test_loader)
 
-original_matrices = np.concatenate(features, axis=0)
-reconstructed_matrices = np.concatenate(reconstructed_feat, axis=0)
+original_matrices = np.concatenate(original_matrices, axis=0)
+reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
 
 # Save original and reconstructed matrices
-np.save("original_matrices.npy", original_matrices)
-np.save("reconstructed_matrices.npy", reconstructed_matrices)
+np.save("results/autoencoder/original_matrices_spd.npy", original_matrices)
+np.save("results/autoencoder/reconstructed_matrices_spd.npy", reconstructed_matrices)
 
 print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
 
