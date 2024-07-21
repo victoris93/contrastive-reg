@@ -227,9 +227,9 @@ def mean_correlation(y_true, y_pred):
 
 
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, model=None, device = device, num_epochs = 150, batch_size = 32):
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, model=None, device = device, num_epochs = 100, batch_size = 32):
     input_dim_feat = 400
-    output_dim_feat = 50
+    output_dim_feat = 25
     lr = 0.001
     weight_decay = 0
     lambda_0 = 1
@@ -266,17 +266,17 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
                 
-                loss =  recon_loss + lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)
-                train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
-                train_mape = mape_between_subjects(features, reconstructed_feat)
+                loss =  recon_loss + lambda_0*nn.functional.mse_loss(features, reconstructed_feat)#ae_criterion(features, reconstructed_feat)
+                # train_mean_corr = mean_correlations_between_subjects(features, reconstructed_feat)
+                # train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
                 scheduler.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}")
-                loss_terms.append((loss.item(), train_mean_corr, train_mape))
+                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f}") # | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}
+                loss_terms.append((loss.item())) #train_mean_corr, train_mape
                 # loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 
             model.eval()
@@ -301,7 +301,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
             val_mean_corr /= len(val_loader)
             val_mape /= len(val_loader)
 
-            pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}|Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f}")
+            pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
 
 
             loss_terms.append((loss, val_loss, val_mean_corr, val_mape))
@@ -309,15 +309,18 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
     model_weights = model.state_dict()
     return loss_terms, model_weights, (val_mape, val_loss, val_mean_corr)
 
-dataset_path = "ABCD/abcd_dataset_400parcels.nc"
+random_state = np.random.RandomState(seed=42)
+
+dataset_path = "data/abcd_dataset_400parcels.nc"
 dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
                            'cbcl_scr_syn_internal_r',
                            'cbcl_scr_syn_external_r',], threshold=0)
 train_val_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
 train_val_dataset = Subset(dataset, train_val_idx)
 test_dataset = Subset(dataset, test_idx)
+np.save("results/autoencoder/test_idx.npy", test_idx)
 
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
+kf = KFold(n_splits=5, shuffle=True, random_state=random_state)
 
 class FoldTrain(submitit.helpers.Checkpointable):
     def __init__(self):
@@ -332,7 +335,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
         self.fold = fold + 1
 
         input_dim_feat=400
-        output_dim_feat=50
+        output_dim_feat=25
         train_features = dataset.matrices[train_idx]
         mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
         [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
@@ -351,6 +354,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
                         "val_loss": perf_metrics[1],
                         "val_corr": perf_metrics[2]
                         } 
+        return self.results
 
         def checkpoint(self, *args, **kwargs):
             print("Checkpointing", flush=True)
@@ -361,18 +365,18 @@ class FoldTrain(submitit.helpers.Checkpointable):
                 pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 if multi_gpu:
-    log_folder = Path("log_folder")
+    log_folder = Path("logs")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
         timeout_min=120,
-        # slurm_account="ftj@a100",
-        slurm_partition="gpu_short",
+        slurm_account="ftj@a100",
+        # slurm_partition="prepost",
         gpus_per_node=1,
         tasks_per_node=1,
         nodes=1,
-#         cpus_per_task=10,
+        cpus_per_task=40,
         #slurm_qos="qos_gpu-t3",
-        # slurm_constraint="a100",
+        slurm_constraint="a100",
         #slurm_mem="10G",
         #slurm_additional_parameters={"requeue": True}
     )
@@ -383,7 +387,7 @@ if multi_gpu:
     with executor.batch():
         for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
             run_train_fold = FoldTrain()
-            job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset)
+            job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset, random_state = random_state)
             fold_jobs.append(job)
 
     async def get_result(fold_jobs):
@@ -398,18 +402,30 @@ else:
     fold_results = []
     for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
         run_train_fold = FoldTrain()
-        job = run_train_fold(fold, train_idx, val_idx, train_val_dataset)
-        experiment_results.append(job)
+        job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state)
+        fold_results.append(job)
 
-### TEST
-
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-model = AutoEncoder(input_dim_feat, output_dim_feat, B_init_fMRI).to(device)
-
+# TEST
 folds = [fold_dict["fold"] for fold_dict in fold_results]
 val_mape = [fold_dict["val_mape"] for fold_dict in fold_results]
-best_fold = folds[val_mape.index(np.min(val_mape))]
+best_fold = 1 # folds[val_mape.index(np.min(val_mape))]
 print("BEST FOLD IS: ", best_fold)
+
+test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+input_dim_feat = 400
+output_dim_feat = 25
+lr = 0.001
+weight_decay = 0
+lambda_0 = 1
+dropout_rate = 0
+
+model = AutoEncoder(
+            input_dim_feat,
+            output_dim_feat,
+            torch.randn(input_dim_feat, output_dim_feat),
+            dropout_rate
+        ).to(device)
+
 model.load_state_dict(torch.load(f"results/autoencoder/autoencoder_weights_fold{best_fold}.pth"))  # Load the best fold weights
 
 model.eval()
@@ -425,13 +441,12 @@ with torch.no_grad():
         
         embedded_feat = model.encode_feat(features)
         reconstructed_feat = model.decode_feat(embedded_feat)
-        np.save(f'results/autoencoder/recon_mat/recon_mat{fold}_batch_{i+1}', reconstructed_feat.cpu().numpy())
-        mape_mat = torch.abs((X - reconstructed_feat) / (X + 1e-10)) * 100
-        print(mape_mat.shape)
-        mean_mape_mat = torch.mean(mape_mat, dim=0).cpu().numpy()
-        np.save(f'results/autoencoder/recon_mat/mean_mape_mat{fold}_batch_{i+1}', mean_mape_mat)
+        np.save(f'results/autoencoder/recon_mat/recon_mat_fold{best_fold}_batch_{i+1}', reconstructed_feat.cpu().numpy())
+        mape_mat = torch.abs((features - reconstructed_feat) / (features + 1e-10)) * 100
+        # mean_mape_mat = torch.mean(mape_mat, dim=0).cpu().numpy()
+        np.save(f'results/autoencoder/recon_mat/mape_mat_fold{best_fold}_batch_{i+1}', mape_mat.cpu().numpy())
         
-        test_loss += lambda_0*torch.norm((features-reconstructed_feat))**2
+        test_loss += lambda_0*nn.functional.mse_loss(features, reconstructed_feat)
         test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
         test_mape += mape_between_subjects(features, reconstructed_feat).item()
 
