@@ -290,8 +290,8 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
             dropout_rate
         ).to(device)
         
-    #model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    #model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
 
     ae_criterion = LogEuclideanLoss().to(device)
