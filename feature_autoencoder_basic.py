@@ -171,7 +171,7 @@ def mape_between_subjects(y_true, y_pred):
                     pred_val = y_pred[subj, i, j]
                     
                     # Add epsilon to denominator to avoid division by zero
-                    mape = (np.abs((true_val - pred_val)) / np.abs(true_val) + eps) * 100.0
+                    mape = (np.abs((true_val - pred_val)) / (np.abs(true_val) + eps)) * 100.0
                     upper_true.append(true_val)
                     upper_pred.append(pred_val)
                     mapes.append(mape)
