@@ -23,30 +23,16 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm.auto import tqdm
 from geoopt.optim import RiemannianAdam
 from geoopt.manifolds import SymmetricPositiveDefinite
-from torch.utils.tensorboard import SummaryWriter
 import yaml
 import os
+import hydra
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.tensorboard import SummaryWriter
+
 
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-with open('/data/parietal/store2/work/mrenaudi/contrastive-reg-3/config_feature_autoencoder_basic.yaml', 'r') as f:
-    config = yaml.safe_load(f)
-
-# Extract parameters from config
-loss_function = config['loss_function']
-learning_rate = config['learning_rate']
-weight_decay = config['weight_decay']
-dropout_rate = config['dropout_rate']
-num_epochs = config['num_epochs']
-batch_size = config['batch_size']
-output_dim_feat = config['output_dim_feat']
-path_feat = config['path_feat']
-path_targets = config['path_targets']
-original_dir = config['original_dir']
-reconstructed_dir = config['reconstructed_dir']
-tensorboard_dir = config['tensorboard_dir']
-weight_dir = config['weight_dir']
 
 # %%
 class LogEuclideanLoss(nn.Module):
@@ -219,12 +205,14 @@ def mean_correlations_between_subjects(y_true, y_pred):
     
     return correlation
 # %%
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, num_epochs = config['num_epochs'], batch_size = config['batch_size']):
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, cfg = None, writer = None, experiment_dir=None):
     input_dim_feat = 100
-    output_dim_feat = config['output_dim_feat']
-    lr = config['learning_rate']
-    weight_decay = config['weight_decay']
-    dropout_rate = config['dropout_rate']
+    output_dim_feat = cfg.output_dim_feat
+    lr = cfg.learning_rate
+    weight_decay = cfg.weight_decay
+    dropout_rate = cfg.dropout_rate
+    batch_size = cfg.batch_size
+    num_epochs = cfg.num_epochs
     
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -241,10 +229,10 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     model.enc1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     model.enc2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
-    if loss_function == 'LogEuclidean':
+    if cfg.loss_function == 'LogEuclidean':
         criterion = LogEuclideanLoss()
         optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
-    elif loss_function == 'Norm':
+    elif cfg.loss_function == 'Norm':
         criterion = NormLoss()
         optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
     else:
@@ -309,109 +297,119 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
 
     if best_weights is not None:
         model.load_state_dict(best_weights)
-    torch.save(model.state_dict(), os.path.join(config['weight_dir'], "best_autoencoder_weights.pth"))
+    torch.save(model.state_dict(), os.path.join(experiment_dir,cfg.weight_dir, "best_autoencoder_weights.pth"))
 
     return loss_terms, model.state_dict(), val_loss.item()
 
 
 # %%
-path_feat = config['path_feat']
-path_target = config['path_targets']
-dataset = MatData(path_feat, path_target)
-train_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
-train_dataset = Subset(dataset, train_idx)
-test_dataset = Subset(dataset, test_idx)
-
-input_dim_feat = 100
-output_dim_feat = 50
-dropout_rate = 0
-train_features = dataset.matrices[train_idx]
-
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
-fold_models = []
-all_mape = []
-all_corr = []
-
-# %%
-best_val_loss = 1e10
-
-for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
+@hydra.main(config_path=".", config_name="config_feature_autoencoder_basic")
+def main(cfg: DictConfig):
+    # Print configuration to track what is being used
+    print(OmegaConf.to_yaml(cfg))
     
-    print(f"Fold {fold + 1}")
+    experiment_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(os.path.join(experiment_dir, cfg.tensorboard_dir), exist_ok=True)
+    os.makedirs(os.path.join(experiment_dir, cfg.weight_dir), exist_ok=True)
     
-    writer = SummaryWriter(log_dir=config['tensorboard_dir'])
     
-    train_data = Subset(train_dataset, train_val_idx)
-    train_features = torch.stack([train_data[i][0] for i in range(len(train_data))])
-    mean_f = torch.mean(train_features, dim=0).to(device)
-    [D, V] = torch.linalg.eigh(mean_f, UPLO="U")
-    B_init_fMRI = V[:, input_dim_feat - output_dim_feat:]
-    train_targets = torch.stack([train_data[i][1] for i in range(len(train_data))])
+    path_feat = cfg.path_feat
+    path_target = cfg.path_targets
+    dataset = MatData(path_feat, path_target)
+    train_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=42)
+    train_dataset = Subset(dataset, train_idx)
+    test_dataset = Subset(dataset, test_idx)
 
-    val_data = Subset(train_dataset, val_idx)
-    
-    loss_terms, trained_weights, val_loss = train_autoencoder(train_data, val_data, B_init_fMRI)
-    
-    loss_terms_path = os.path.join(config['weight_dir'], f"fold_{fold + 1}_loss_terms.pkl")
-    with open(loss_terms_path, "wb") as f:
-        pickle.dump(loss_terms, f)
-    
-    weights_path = os.path.join(config['weight_dir'], f"autoencoder_weights_fold_{fold + 1}.pth")
-    torch.save(trained_weights, weights_path)
+    #train_features = dataset.matrices[train_idx]
 
-    if val_loss < best_val_loss:
-        best_val_loss = val_loss
-        best_fold = fold + 1
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    fold_models = []
+    all_mape = []
+    all_corr = []
+
+    best_val_loss = 1e10
+
+    for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
         
+        print(f"Fold {fold + 1}")
+        
+        writer = SummaryWriter(log_dir=cfg.tensorboard_dir)
+        
+        train_data = Subset(train_dataset, train_val_idx)
+        train_features = torch.stack([train_data[i][0] for i in range(len(train_data))])
+        mean_f = torch.mean(train_features, dim=0).to(device)
+        [D, V] = torch.linalg.eigh(mean_f, UPLO="U")
+        B_init_fMRI = V[:, cfg.input_dim_feat - cfg.output_dim_feat:]
+        train_targets = torch.stack([train_data[i][1] for i in range(len(train_data))])
+
+        val_data = Subset(train_dataset, val_idx)
+        
+        loss_terms, trained_weights, val_loss = train_autoencoder(train_data, val_data, B_init_fMRI, cfg=cfg, writer = writer, experiment_dir = experiment_dir)
+        
+        loss_terms_path = os.path.join(experiment_dir, cfg.weight_dir, f"fold_{fold + 1}_loss_terms.pkl")
+        with open(loss_terms_path, "wb") as f:
+            pickle.dump(loss_terms, f)
+        
+        weights_path = os.path.join(experiment_dir,cfg.weight_dir, f"autoencoder_weights_fold_{fold + 1}.pth")
+        torch.save(trained_weights, weights_path)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_fold = fold + 1
+            
+        writer.close()
+    # Evaluate on the test set using the best fold
+    print(f"Loading weights from fold {best_fold} with lowest validation loss {best_val_loss:.02f}")
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    model = AutoEncoder(cfg.input_dim_feat, cfg.output_dim_feat, B_init_fMRI, cfg.dropout_rate).to(device)
+    best_weights_path = os.path.join(experiment_dir, cfg.weight_dir, f"autoencoder_weights_fold_{best_fold}.pth")
+    model.load_state_dict(torch.load(best_weights_path))  
+
+    model.eval()
+    test_loss = 0
+    test_mean_corr = 0
+    test_mape = 0
+    original_matrices = []
+    reconstructed_matrices = []
+
+    if cfg.loss_function == 'LogEuclidean':
+            criterion = LogEuclideanLoss()
+    elif cfg.loss_function == 'Norm':
+            criterion = NormLoss()
+    else:
+            raise ValueError("Unsupported loss function specified in config")
+        
+    with torch.no_grad():
+        for features, targets in test_loader:
+            features = features.to(device)
+            eye = torch.eye(features.size(-1), device=device)
+            embedded_feat = model.encode_feat(features)
+            reconstructed_feat = model.decode_feat(embedded_feat)
+            original_matrices.append(features.cpu().numpy())
+            reconstructed_matrices.append(reconstructed_feat.cpu().numpy())
+            test_loss += criterion(features,reconstructed_feat)
+            test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+            test_mape += mape_between_subjects(features, reconstructed_feat).item()
+            writer.add_scalar('Loss/test', test_loss.item())
+            writer.add_scalar('Metric/test_mean_corr', test_mean_corr)
+            writer.add_scalar('Metric/test_mape', test_mape)
+
+    test_loss /= len(test_loader)
+    test_mean_corr /= len(test_loader)
+    test_mape /= len(test_loader)
+
+
+    original_matrices = np.concatenate(original_matrices, axis=0)
+    reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
     writer.close()
-# %%
-# Evaluate on the test set using the best fold
-print(f"Loading weights from fold {best_fold} with lowest validation loss {best_val_loss:.02f}")
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-model = AutoEncoder(input_dim_feat, output_dim_feat, B_init_fMRI, dropout_rate).to(device)
-best_weights_path = os.path.join(config['weight_dir'], f"autoencoder_weights_fold_{best_fold}.pth")
-model.load_state_dict(torch.load(best_weights_path))  
+    # Save original and reconstructed matrices
+    original_path = os.path.join(experiment_dir, cfg.original_dir)
+    reconstructed_path = os.path.join(experiment_dir, cfg.reconstructed_dir)
+    np.save(original_path, original_matrices)
+    np.save(reconstructed_path, reconstructed_matrices)
 
-model.eval()
-test_loss = 0
-test_mean_corr = 0
-test_mape = 0
-original_matrices = []
-reconstructed_matrices = []
+    print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
 
-if loss_function == 'LogEuclidean':
-        criterion = LogEuclideanLoss()
-elif loss_function == 'Norm':
-        criterion = NormLoss()
-else:
-        raise ValueError("Unsupported loss function specified in config")
-    
-with torch.no_grad():
-    for features, targets in test_loader:
-        features = features.to(device)
-        eye = torch.eye(features.size(-1), device=device)
-        embedded_feat = model.encode_feat(features)
-        reconstructed_feat = model.decode_feat(embedded_feat)
-        original_matrices.append(features.cpu().numpy())
-        reconstructed_matrices.append(reconstructed_feat.cpu().numpy())
-        test_loss += criterion(features,reconstructed_feat)
-        test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
-        test_mape += mape_between_subjects(features, reconstructed_feat).item()
-        writer.add_scalar('Loss/test', test_loss.item())
-        writer.add_scalar('Metric/test_mean_corr', test_mean_corr)
-        writer.add_scalar('Metric/test_mape', test_mape)
-
-test_loss /= len(test_loader)
-test_mean_corr /= len(test_loader)
-test_mape /= len(test_loader)
-
-
-original_matrices = np.concatenate(original_matrices, axis=0)
-reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
-writer.close()
-# Save original and reconstructed matrices
-np.save(config['original_dir'], original_matrices)
-np.save(config['reconstructed_dir'], reconstructed_matrices)
-
-print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
-
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,8 @@
+
+experiment_name: "xp4"
+hypothesis: "Testing basic autoencoder configuration"
 # Training parameters
-num_epochs: 400
+num_epochs: 1
 batch_size: 32
 learning_rate: 0.001
 weight_decay: 0
@@ -10,14 +13,16 @@ input_dim_feat: 100
 output_dim_feat: 50
 
 # Loss function and optimizer
-loss_function: LogEuclidean  # Options: LogEuclidean, Norm
+loss_function: Norm  # Options: LogEuclidean, Norm
 
 # Paths for data
 path_feat: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"  
 path_targets: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"  
 
 # Directory for saving results
-original_dir: "results/autoencoder/original.npy"
-reconstructed_dir : "results/autoencoder/reconstructed.npy"
-tensorboard_dir: "tensorboard/autoencoder"
-weight_dir : "weights/autoencoder_weights.pth"
+original_dir: original
+reconstructed_dir : reconstructed
+tensorboard_dir: tensorboard
+weight_dir : weights
+
+output_dir: /data/parietal/store2/work/mrenaudi/contrastive-reg-3/hydra
