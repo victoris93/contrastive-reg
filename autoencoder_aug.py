@@ -44,7 +44,6 @@ class LogEuclideanLoss(nn.Module):
         matmul1 = torch.matmul(log_eigvals, Eigvecs.transpose(-2, -1))
         matmul2 = torch.matmul(Eigvecs, matmul1)
         return matmul2
-        
 
     def forward(self, features, recon_features):
         """
@@ -117,11 +116,22 @@ class MatData(Dataset):
         self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
         if threshold > 0:
             self.matrices = self.threshold_mat(self.matrices, self.threshold)
+        self.matrices = self.transform_matrices(self.matrices)
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         self.target = torch.from_numpy(np.array([self.data_array[target_name].values for target_name in self.target_names]).T).to(torch.float32)
 
         gc.collect()
 
+    def transform_matrices(self, matrices):
+        transformed_matrices = []
+        for matrix in matrices:
+            eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+            transformed_eigenvalues = np.log(eigenvalues+ 1)
+            transformed_matrix = eigenvectors @ np.diag(transformed_eigenvalues) @ eigenvectors.T
+            transformed_matrices.append([transformed_matrix*5])
+        transformed_matrices = np.concatenate(transformed_matrices)
+        return transformed_matrices
+    
     def threshold_mat(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
         mask = np.abs(matrices) >= perc
@@ -141,11 +151,9 @@ class MatData(Dataset):
         return matrix, target
 
 
-
 def mean_absolute_percentage_error(y_true, y_pred):
     eps = 1e-6
     return torch.mean(torch.abs((y_true - y_pred)) / torch.abs(y_true)+eps) * 100
-
 
 
 def mape_between_subjects(y_true, y_pred):
@@ -189,7 +197,6 @@ def mean_correlation(y_true, y_pred):
     return np.mean(correlations)
 
 
-
 def mean_correlations_between_subjects(y_true, y_pred):
     correlations = []
     y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
@@ -229,10 +236,10 @@ def mean_correlation(y_true, y_pred):
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, model=None, device = device, num_epochs = 100, batch_size = 32):
     input_dim_feat = 400
-    output_dim_feat = 25
+    output_dim_feat = 50
     lr = 0.001
     weight_decay = 0
-    lambda_0 = 1
+    lambda_0 = 100
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -250,7 +257,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
     
     ae_criterion = LogEuclideanLoss().to(device)
     optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer_autoencoder, 100, 0.5, last_epoch=-1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder, factor=0.1, patience = 5)
     loss_terms = []
     perf_metrics = []
     model.train()
@@ -271,14 +278,9 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
                 # train_mape = mape_between_subjects(features, reconstructed_feat)
                 #loss = ae_criterion(features, reconstructed_feat)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                 optimizer_autoencoder.step()
-                scheduler.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f}") # | Train corr {train_mean_corr:.02f} | Train mape {train_mape:.02f}
-                loss_terms.append((loss.item())) #train_mean_corr, train_mape
-                # loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                
+                loss_terms.append((loss.item())) #train_mean_corr, train_mape    
             model.eval()
             val_loss = 0
             val_mean_corr = 0
@@ -292,7 +294,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
                     reconstructed_feat = model.decode_feat(embedded_feat)
 
                     #loss = ae_criterion(features, reconstructed_feat)
-                    val_loss += lambda_0*torch.norm((features-reconstructed_feat))**2#ae_criterion(features, reconstructed_feat)#
+                    val_loss += lambda_0*nn.functional.mse_loss(features, reconstructed_feat)
 
                     val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                     val_mape += mape_between_subjects(features, reconstructed_feat).item()
@@ -300,18 +302,21 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, dropout_rate, mod
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
             val_mape /= len(val_loader)
+            scheduler.step(val_loss)
+            if np.log10(scheduler._last_lr[0]) < -4:
+                break
 
-            pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
+            pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
 
 
-            loss_terms.append((loss, val_loss, val_mean_corr, val_mape))
+            # loss_terms.append((loss, val_loss, val_mean_corr, val_mape))
 
     model_weights = model.state_dict()
     return loss_terms, model_weights, (val_mape, val_loss, val_mean_corr)
 
 random_state = np.random.RandomState(seed=42)
 
-dataset_path = "data/abcd_dataset_400parcels.nc"
+dataset_path = "ABCD/abcd_dataset_400parcels.nc"
 dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
                            'cbcl_scr_syn_internal_r',
                            'cbcl_scr_syn_external_r',], threshold=0)
@@ -335,12 +340,11 @@ class FoldTrain(submitit.helpers.Checkpointable):
         self.fold = fold + 1
 
         input_dim_feat=400
-        output_dim_feat=25
+        output_dim_feat=50
         train_features = dataset.matrices[train_idx]
         mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
         [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
         B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
-        best_mape = torch.inf
 
         print(f"Fold {self.fold}")
         fold_train_dataset = Subset(train_dataset, train_idx)
@@ -356,27 +360,26 @@ class FoldTrain(submitit.helpers.Checkpointable):
                         } 
         return self.results
 
-        def checkpoint(self, *args, **kwargs):
-            print("Checkpointing", flush=True)
-            return super().checkpoint(*args, **kwargs)
+    def checkpoint(self, *args, **kwargs):
+        print("Checkpointing", flush=True)
+        return super().checkpoint(*args, **kwargs)
 
-        def save(self, path: Path):
-            with open(path, "wb") as o:
-                pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
+    def save(self, path: Path):
+        with open(path, "wb") as o:
+            pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 if multi_gpu:
     log_folder = Path("logs")
     executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
     executor.update_parameters(
         timeout_min=120,
-        slurm_account="ftj@a100",
-        # slurm_partition="prepost",
+        slurm_partition="gpu_short",
         gpus_per_node=1,
         tasks_per_node=1,
         nodes=1,
-        cpus_per_task=40,
+        cpus_per_task=30
         #slurm_qos="qos_gpu-t3",
-        slurm_constraint="a100",
+        # slurm_constraint="a100",
         #slurm_mem="10G",
         #slurm_additional_parameters={"requeue": True}
     )
@@ -397,7 +400,6 @@ if multi_gpu:
             fold_results.append(res)
         return fold_results
     fold_results = asyncio.run(get_result(fold_jobs))
-
 else:
     fold_results = []
     for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
@@ -413,10 +415,10 @@ print("BEST FOLD IS: ", best_fold)
 
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 input_dim_feat = 400
-output_dim_feat = 25
+output_dim_feat = 50
 lr = 0.001
 weight_decay = 0
-lambda_0 = 1
+lambda_0 = 100
 dropout_rate = 0
 
 model = AutoEncoder(
