@@ -27,6 +27,12 @@ import yaml
 import os
 import hydra
 from omegaconf import DictConfig, OmegaConf
+from nilearn.plotting import plot_matrix
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr
+from PIL import Image
+from hydra.utils import get_original_cwd
+import shutil
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -148,6 +154,7 @@ class MatData(Dataset):
     
 # %%
 """
+
 Functions to compute various metrics : MAPE and correlation accross subjects.
 
 """
@@ -182,8 +189,6 @@ def mape_between_subjects(y_true, y_pred):
 
 def mean_correlations_between_subjects(y_true, y_pred):
     correlations = []
-    y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
-    y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
     
     num_subjects = y_true.shape[0]
     matrix_size = y_true.shape[1]
@@ -205,7 +210,94 @@ def mean_correlations_between_subjects(y_true, y_pred):
     
     return correlation
 # %%
-def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, cfg = None, writer = None, experiment_dir=None):
+"""
+
+Functions to log visualizations and metrics into Tensorboard.
+
+"""
+def log_mape_between_subjects(writer, y_true, y_pred):
+    eps = 1e-6
+    
+    num_subjects = y_true.shape[0]
+    matrix_size = y_true.shape[1]
+    
+    # Initialize matrix to store MAPE values
+    mape_matrix = np.zeros((matrix_size, matrix_size))
+    
+    for i in range(matrix_size):
+        for j in range(i + 1, matrix_size):
+            mapes = []
+            for subj in range(num_subjects):
+                true_val = y_true[subj, i, j]
+                pred_val = y_pred[subj, i, j]
+                
+                # Add epsilon to denominator to avoid division by zero
+                mape = (np.abs((true_val - pred_val)) / (np.abs(true_val) + eps)) * 100.0
+                mapes.append(mape)
+            
+            # Average MAPE for each element across subjects
+            mean_mape = np.mean(mapes)
+            mape_matrix[i, j] = mean_mape
+            mape_matrix[j, i] = mean_mape  # Ensure the matrix is symmetric
+    
+    display = plot_matrix(mape_matrix, figure=(10, 8), vmin=0, vmax=300, colorbar=True, cmap='viridis')
+    
+    # Save the plot to a temporary file
+    temp_file = f"temp_mape_matrix.png"
+    display.figure.savefig(temp_file)
+    #display.close() 
+    
+    img = Image.open(temp_file).convert('RGB')
+    img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
+    img_tensor = torch.tensor(img).permute(2, 0, 1) 
+    
+    writer.add_image('MAPE matrix', img_tensor)
+
+    # Remove the temporary file
+    os.remove(temp_file)
+
+
+def log_correlations_between_subjects(writer, y_true, y_pred):
+    
+    num_subjects = y_true.shape[0]
+    matrix_size = y_true.shape[1]
+    
+    # Initialize matrix to store correlation values
+    correlation_matrix = np.zeros((matrix_size, matrix_size))
+    
+    for i in range(matrix_size):
+        for j in range(i + 1, matrix_size):
+            true_vals = []
+            pred_vals = []
+            for subj in range(num_subjects):
+                true_vals.append(y_true[subj, i, j])
+                pred_vals.append(y_pred[subj, i, j])
+            
+            # Calculate Spearman correlation
+            spearman_corr, _ = spearmanr(true_vals, pred_vals)
+            correlation_matrix[i, j] = spearman_corr
+            correlation_matrix[j, i] = spearman_corr  # Ensure the matrix is symmetric
+    
+    display = plot_matrix(correlation_matrix, figure=(5, 4), vmin=-1, vmax=1, colorbar=True)
+    temp_file = f"temp_corr_matrix.png"
+    display.figure.savefig(temp_file)
+    #display.close()
+    # Log the plot to TensorBoard
+    img = Image.open(temp_file).convert('RGB')
+    img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
+    img_tensor = torch.tensor(img).permute(2, 0, 1) 
+    
+    writer.add_image('Correlation matrix', img_tensor)
+    # Remove the temporary file
+    os.remove(temp_file)
+
+    
+    
+
+    
+
+# %%
+def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, device = device, cfg = None, experiment_dir=None):
     input_dim_feat = 100
     output_dim_feat = cfg.output_dim_feat
     lr = cfg.learning_rate
@@ -255,7 +347,6 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                 loss.backward()
                 optimizer_autoencoder.step()
                 scheduler.step()
-                writer.add_scalar('Loss/train', loss.item(), epoch)
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
 
             model.eval()
@@ -274,9 +365,6 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                         val_loss += criterion(features,reconstructed_feat)
                         val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                         val_mape += mape_between_subjects(features, reconstructed_feat).item()
-                        writer.add_scalar('Loss/val', val_loss.item(), epoch)
-                        writer.add_scalar('Metric/val_mean_corr', val_mean_corr, epoch)
-                        writer.add_scalar('Metric/val_mape', val_mape, epoch)
                         pbar.set_postfix_str(f"Epoch {epoch} | Train Loss {loss:.02f} | Validation Loss: {val_loss:.02f}")
                     
 
@@ -284,10 +372,6 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     val_mean_corr /= len(val_loader)
     val_mape /= len(val_loader)
 
-    writer.add_scalar('Loss/val', val_loss.item(), epoch)
-    writer.add_scalar('Metric/val_mean_corr', val_mean_corr, epoch)
-    writer.add_scalar('Metric/val_mape', val_mape, epoch)
-    
     loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
     
     # Save best model weights
@@ -312,7 +396,15 @@ def main(cfg: DictConfig):
     os.makedirs(experiment_dir, exist_ok=True)
     os.makedirs(os.path.join(experiment_dir, cfg.tensorboard_dir), exist_ok=True)
     os.makedirs(os.path.join(experiment_dir, cfg.weight_dir), exist_ok=True)
-    
+    os.makedirs(os.path.join(experiment_dir,cfg.original_dir),exist_ok = True )
+    os.makedirs(os.path.join(experiment_dir,cfg.reconstructed_dir),exist_ok = True )
+
+    config_path = get_original_cwd()  # Get the original working directory where Hydra started
+    config_file = os.path.join(config_path, 'config_feature_autoencoder_basic.yaml')
+    if os.path.exists(config_file):
+        shutil.copy(config_file, os.path.join(experiment_dir, 'config_feature_autoencoder_basic.yaml'))
+    else:
+        print(f"Config file {config_file} does not exist.")
     
     path_feat = cfg.path_feat
     path_target = cfg.path_targets
@@ -329,12 +421,12 @@ def main(cfg: DictConfig):
     all_corr = []
 
     best_val_loss = 1e10
-
+    
+    
     for fold, (train_val_idx, val_idx) in enumerate(kf.split(train_dataset)):
         
         print(f"Fold {fold + 1}")
         
-        writer = SummaryWriter(log_dir=cfg.tensorboard_dir)
         
         train_data = Subset(train_dataset, train_val_idx)
         train_features = torch.stack([train_data[i][0] for i in range(len(train_data))])
@@ -345,11 +437,7 @@ def main(cfg: DictConfig):
 
         val_data = Subset(train_dataset, val_idx)
         
-        loss_terms, trained_weights, val_loss = train_autoencoder(train_data, val_data, B_init_fMRI, cfg=cfg, writer = writer, experiment_dir = experiment_dir)
-        
-        loss_terms_path = os.path.join(experiment_dir, cfg.weight_dir, f"fold_{fold + 1}_loss_terms.pkl")
-        with open(loss_terms_path, "wb") as f:
-            pickle.dump(loss_terms, f)
+        loss_terms, trained_weights, val_loss = train_autoencoder(train_data, val_data, B_init_fMRI, cfg=cfg, experiment_dir = experiment_dir)
         
         weights_path = os.path.join(experiment_dir,cfg.weight_dir, f"autoencoder_weights_fold_{fold + 1}.pth")
         torch.save(trained_weights, weights_path)
@@ -358,7 +446,7 @@ def main(cfg: DictConfig):
             best_val_loss = val_loss
             best_fold = fold + 1
             
-        writer.close()
+        
     # Evaluate on the test set using the best fold
     print(f"Loading weights from fold {best_fold} with lowest validation loss {best_val_loss:.02f}")
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -372,7 +460,9 @@ def main(cfg: DictConfig):
     test_mape = 0
     original_matrices = []
     reconstructed_matrices = []
+    tensorboard_dir = os.path.join(experiment_dir, cfg.tensorboard_dir)
 
+    writer = SummaryWriter(log_dir=tensorboard_dir)
     if cfg.loss_function == 'LogEuclidean':
             criterion = LogEuclideanLoss()
     elif cfg.loss_function == 'Norm':
@@ -391,9 +481,7 @@ def main(cfg: DictConfig):
             test_loss += criterion(features,reconstructed_feat)
             test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
             test_mape += mape_between_subjects(features, reconstructed_feat).item()
-            writer.add_scalar('Loss/test', test_loss.item())
-            writer.add_scalar('Metric/test_mean_corr', test_mean_corr)
-            writer.add_scalar('Metric/test_mape', test_mape)
+            
 
     test_loss /= len(test_loader)
     test_mean_corr /= len(test_loader)
@@ -402,10 +490,14 @@ def main(cfg: DictConfig):
 
     original_matrices = np.concatenate(original_matrices, axis=0)
     reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
+    
+    log_mape_between_subjects(writer, original_matrices, reconstructed_matrices)
+    log_correlations_between_subjects(writer, original_matrices, reconstructed_matrices)
+    
     writer.close()
     # Save original and reconstructed matrices
-    original_path = os.path.join(experiment_dir, cfg.original_dir)
-    reconstructed_path = os.path.join(experiment_dir, cfg.reconstructed_dir)
+    original_path = os.path.join(experiment_dir, cfg.original_dir, f"Original.npy")
+    reconstructed_path = os.path.join(experiment_dir, cfg.reconstructed_dir, f"Reconstructed.npy")
     np.save(original_path, original_matrices)
     np.save(reconstructed_path, reconstructed_matrices)
 

@@ -1,6 +1,6 @@
 
-experiment_name: "xp4"
-hypothesis: "Testing basic autoencoder configuration"
+experiment_name: "xp3"
+hypothesis: "Testing saving original and reconstructed matrices : adding .npy extension at the end of the path"
 # Training parameters
 num_epochs: 1
 batch_size: 32
