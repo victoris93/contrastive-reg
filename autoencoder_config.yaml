@@ -1,0 +1,27 @@
+
+experiment_name: "ae_xp1"
+hypothesis: "Testing basic autoencoder configuration"
+# Training parameters
+multi_gpu: True
+num_epochs: 100
+batch_size: 32
+kfolds: 5
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 50
+
+# Loss function and optimizer
+loss_function: MSE  # Options: LogEuclidean, Norm, mse
+
+# Paths for data
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
+
+# Directory for saving results
+reconstructed_dir : recon_mat
+model_weight_dir : saved_models
+tensorboard_dir: tensorboard
+output_dir: '/well/margulies/users/cpy397/contrastive-learning/results'
