@@ -1,6 +1,6 @@
 
-experiment_name: "xp3"
-hypothesis: "Testing saving original and reconstructed matrices : adding .npy extension at the end of the path"
+experiment_name: "xp8"
+hypothesis: "Add region ranking in the log of the tensorboard"
 # Training parameters
 num_epochs: 1
 batch_size: 32
@@ -25,4 +25,5 @@ reconstructed_dir : reconstructed
 tensorboard_dir: tensorboard
 weight_dir : weights
 
-output_dir: /data/parietal/store2/work/mrenaudi/contrastive-reg-3/hydra
+branch_name: feat_ae_basic
+output_dir: /data/parietal/store2/work/mrenaudi/contrastive-reg-3/hydra/${branch_name}

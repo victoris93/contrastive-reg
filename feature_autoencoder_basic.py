@@ -33,6 +33,9 @@ from scipy.stats import spearmanr
 from PIL import Image
 from hydra.utils import get_original_cwd
 import shutil
+from nilearn import datasets
+import tabulate
+
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -215,7 +218,7 @@ def mean_correlations_between_subjects(y_true, y_pred):
 Functions to log visualizations and metrics into Tensorboard.
 
 """
-def log_mape_between_subjects(writer, y_true, y_pred):
+def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
     eps = 1e-6
     
     num_subjects = y_true.shape[0]
@@ -238,20 +241,36 @@ def log_mape_between_subjects(writer, y_true, y_pred):
             # Average MAPE for each element across subjects
             mean_mape = np.mean(mapes)
             mape_matrix[i, j] = mean_mape
-            mape_matrix[j, i] = mean_mape  # Ensure the matrix is symmetric
+            mape_matrix[j, i] = mean_mape 
+            
+    ##Log the ranking of predictions by region
+    atlas = datasets.fetch_atlas_schaefer_2018(n_rois=100)
+    atlas_labels = atlas['labels']
+    row_sum = mape_matrix.sum(axis=1)
     
+    df = pd.DataFrame({
+    'Region': atlas_labels,
+    'MAPE_Sum': row_sum
+    })
+    df['Rank'] = df['MAPE_Sum'].rank(method='min', ascending=False).astype(int)
+    df_sorted = df.sort_values(by='Rank')
+    df_final = df_sorted[['Rank', 'Region']]
+    df_markdown = df_final.to_markdown(index=False)
+    writer.add_text('Metrics/Region Ranking', df_markdown)
+    
+    ##Log the MAPE matrix 
     display = plot_matrix(mape_matrix, figure=(10, 8), vmin=0, vmax=300, colorbar=True, cmap='viridis')
     
     # Save the plot to a temporary file
     temp_file = f"temp_mape_matrix.png"
     display.figure.savefig(temp_file)
-    #display.close() 
+    
     
     img = Image.open(temp_file).convert('RGB')
     img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
     img_tensor = torch.tensor(img).permute(2, 0, 1) 
     
-    writer.add_image('MAPE matrix', img_tensor)
+    writer.add_image('Metrics/MAPE matrix', img_tensor)
 
     # Remove the temporary file
     os.remove(temp_file)
@@ -287,7 +306,7 @@ def log_correlations_between_subjects(writer, y_true, y_pred):
     img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
     img_tensor = torch.tensor(img).permute(2, 0, 1) 
     
-    writer.add_image('Correlation matrix', img_tensor)
+    writer.add_image('Metrics/Correlation matrix', img_tensor)
     # Remove the temporary file
     os.remove(temp_file)
 
@@ -446,7 +465,7 @@ def main(cfg: DictConfig):
             best_val_loss = val_loss
             best_fold = fold + 1
             
-        
+
     # Evaluate on the test set using the best fold
     print(f"Loading weights from fold {best_fold} with lowest validation loss {best_val_loss:.02f}")
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -480,18 +499,17 @@ def main(cfg: DictConfig):
             reconstructed_matrices.append(reconstructed_feat.cpu().numpy())
             test_loss += criterion(features,reconstructed_feat)
             test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
-            test_mape += mape_between_subjects(features, reconstructed_feat).item()
-            
+            test_mape += mape_between_subjects(features, reconstructed_feat).item()  
 
     test_loss /= len(test_loader)
     test_mean_corr /= len(test_loader)
     test_mape /= len(test_loader)
 
-
+    
     original_matrices = np.concatenate(original_matrices, axis=0)
     reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
     
-    log_mape_between_subjects(writer, original_matrices, reconstructed_matrices)
+    log_mape_between_subjects_and_region_rank(writer, original_matrices, reconstructed_matrices)
     log_correlations_between_subjects(writer, original_matrices, reconstructed_matrices)
     
     writer.close()
