@@ -5,6 +5,7 @@ Python script for the feature autoencoder with a basic implementation of D'Souza
 
 
 # %%
+import wandb
 import math
 import asyncio
 import pickle
@@ -36,7 +37,7 @@ import shutil
 from nilearn import datasets
 import tabulate
 
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 
 
 torch.cuda.empty_cache()
@@ -73,7 +74,6 @@ class LogEuclideanLoss(nn.Module):
         device = features.device
         eye = torch.eye(features.size(-1), device=device)
         recon_features_diag = recon_features*(1-eye)+eye
-        recon_features_diag = torch.round(recon_features, decimals=3)
 
         log_features = self.mat_batch_log(features)
         log_recon_features = self.mat_batch_log(recon_features_diag)
@@ -238,7 +238,7 @@ Functions to log visualizations and metrics into Tensorboard.
 """
 
 
-def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred, experiment_dir):
+def log_mape_between_subjects_and_region_rank(wandb, y_true, y_pred, experiment_dir):
     eps = 1e-6
 
     num_subjects = y_true.shape[0]
@@ -273,23 +273,20 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred, experiment
     df['Rank'] = df['MAPE_Sum'].rank(method='min', ascending=False).astype(int)
     df_sorted = df.sort_values(by='Rank')
     df_final = df_sorted[['Rank', 'Region']]
-    df_markdown = df_final.to_markdown(index=False)
-    writer.add_text('Metrics/Region Ranking', df_markdown)
     df_final_path = os.path.join(experiment_dir, 'region_ranking.csv')
-    df_final.to_csv(df_final_path, index=False)    
+    df_final.to_csv(df_final_path, index=False) 
+    wandb.log({'Region Ranking': wandb.Table(dataframe=df_final)})   
     # Log the MAPE matrix
     display = plot_matrix(mape_matrix, figure=(
-        10, 8), vmin=0, vmax=300, colorbar=True, cmap='viridis')
+        10, 8), vmin=0, vmax=200, colorbar=True, cmap='viridis')
     temp_file = f"temp_mape_matrix.png"
     display.figure.savefig(temp_file)
-    img = Image.open(temp_file).convert('RGB')
-    img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
-    img_tensor = torch.tensor(img).permute(2, 0, 1)
-    writer.add_image('Metrics/MAPE matrix', img_tensor)
+    wandb.log({'MAPE Matrix': wandb.Image(temp_file)})
+    
     os.remove(temp_file)
 
 
-def log_correlations_between_subjects(writer, y_true, y_pred):
+def log_correlations_between_subjects(wandb, y_true, y_pred):
 
     num_subjects = y_true.shape[0]
     matrix_size = y_true.shape[1]
@@ -315,14 +312,7 @@ def log_correlations_between_subjects(writer, y_true, y_pred):
         5, 4), vmin=-1, vmax=1, colorbar=True)
     temp_file = f"temp_corr_matrix.png"
     display.figure.savefig(temp_file)
-
-    # Log the plot to TensorBoard
-    img = Image.open(temp_file).convert('RGB')
-    img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
-    img_tensor = torch.tensor(img).permute(2, 0, 1)
-
-    writer.add_image('Metrics/Correlation matrix', img_tensor)
-    # Remove the temporary file
+    wandb.log({'Correlation Matrix': wandb.Image(temp_file)})
     os.remove(temp_file)
 
 # %%
@@ -507,7 +497,9 @@ def main(cfg: DictConfig):
     reconstructed_matrices = []
     tensorboard_dir = os.path.join(experiment_dir, cfg.tensorboard_dir)
 
-    writer = SummaryWriter(log_dir=tensorboard_dir)
+    wandb.init(project=cfg.project, name=cfg.experiment_name)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+
     if cfg.loss_function == 'LogEuclidean':
         criterion = LogEuclideanLoss()
     elif cfg.loss_function == 'Norm':
@@ -537,11 +529,11 @@ def main(cfg: DictConfig):
     reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
 
     log_mape_between_subjects_and_region_rank(
-        writer, original_matrices, reconstructed_matrices, experiment_dir)
+        wandb, original_matrices, reconstructed_matrices, experiment_dir)
     log_correlations_between_subjects(
-        writer, original_matrices, reconstructed_matrices)
+        wandb, original_matrices, reconstructed_matrices)
 
-    writer.close()
+    wandb.finish()
     # Save original and reconstructed matrices
     original_path = os.path.join(
         experiment_dir, cfg.original_dir, f"Original.npy")

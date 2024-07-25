@@ -1,6 +1,6 @@
-
-experiment_name: "xp8"
-hypothesis: "Add region ranking in the log of the tensorboard"
+project: "basic feature autoencoder"
+experiment_name: "xp6"
+hypothesis: "test wandb : tt gérer depuis config file + hyperparamètres sur wandb"
 # Training parameters
 num_epochs: 1
 batch_size: 32
@@ -10,7 +10,7 @@ dropout_rate: 0
 
 # Model dimensions
 input_dim_feat: 100
-output_dim_feat: 50
+output_dim_feat: 10
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm
