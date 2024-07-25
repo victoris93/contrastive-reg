@@ -1,5 +1,5 @@
 
-experiment_name: "ae_loss_mse"
+experiment_name: "ae_loss_norm"
 hypothesis: "Testing basic autoencoder configuration"
 # Training parameters
 multi_gpu: True
@@ -16,7 +16,7 @@ input_dim_feat: 400
 output_dim_feat: 50
 
 # Loss function and optimizer
-loss_function: MSE  # Options: LogEuclidean, Norm, mse
+loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 
 # Paths for data
 dataset_path: "/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  

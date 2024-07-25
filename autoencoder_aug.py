@@ -36,10 +36,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class LogEuclideanLoss(nn.Module):
     def __init__(self):
         super(LogEuclideanLoss, self).__init__()
-    
+
     def mat_batch_log(self, features):
         eps = 1e-6
-        regularized_features = features + eps * torch.eye(features.size(-1), device=features.device)
+        regularized_features = features + eps * \
+            torch.eye(features.size(-1), device=features.device)
         Eigvals, Eigvecs = torch.linalg.eigh(regularized_features)
         Eigvals = torch.clamp(Eigvals, min=eps)
         log_eigvals = torch.diag_embed(torch.log(Eigvals))
@@ -54,19 +55,19 @@ class LogEuclideanLoss(nn.Module):
         Args:
             features: Tensor of shape [batch_size, n_parcels, n_parcels]
             recon_features: Tensor of shape [batch_size, n_parcels, n_parcels]
-        
+
         Returns:
             A loss scalar.
         """
         device = features.device
         eye = torch.eye(features.size(-1), device=device)
         recon_features_diag = recon_features*(1-eye)+eye
-        recon_features_diag = torch.round(recon_features, decimals = 3)
-        
-        
+        recon_features_diag = torch.round(recon_features_diag, decimals=3)
+
         log_features = self.mat_batch_log(features)
         log_recon_features = self.mat_batch_log(recon_features_diag)
-        loss = torch.norm(log_features - log_recon_features, dim=(-2, -1)).mean()
+        loss = torch.norm(log_features - log_recon_features,
+                          dim=(-2, -1)).mean()
         return loss
 
 class NormLoss(nn.Module):
@@ -119,12 +120,6 @@ class AutoEncoder(nn.Module):
     def decode_feat(self,c_hidd_mat):
         z_n = self.dec_mat1(c_hidd_mat).transpose(1,2)
         recon_mat = self.dec_mat2(z_n)
-        recon_mat = torch.round(recon_mat, decimals = 3)
-#         recon_mat_sym = torch.stack([(mat + mat.transpose(0,1))/2 for mat in recon_mat])
-#         for mat in recon_mat_sym:
-#             print(torch.all(mat == mat.transpose(0,1)))
-#             if not torch.all(mat == mat.transpose(0,1)):
-#                 np.save(f"debug/asym_{recon_mat_sym.size(0)}", recon_mat_sym.detach().cpu().numpy())
         return recon_mat
 
 class MatData(Dataset):
