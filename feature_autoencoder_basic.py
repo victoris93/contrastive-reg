@@ -238,7 +238,7 @@ Functions to log visualizations and metrics into Tensorboard.
 """
 
 
-def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
+def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred, experiment_dir):
     eps = 1e-6
 
     num_subjects = y_true.shape[0]
@@ -275,7 +275,8 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
     df_final = df_sorted[['Rank', 'Region']]
     df_markdown = df_final.to_markdown(index=False)
     writer.add_text('Metrics/Region Ranking', df_markdown)
-
+    df_final_path = os.path.join(experiment_dir, 'region_ranking.csv')
+    df_final.to_csv(df_final_path, index=False)    
     # Log the MAPE matrix
     display = plot_matrix(mape_matrix, figure=(
         10, 8), vmin=0, vmax=300, colorbar=True, cmap='viridis')
@@ -536,7 +537,7 @@ def main(cfg: DictConfig):
     reconstructed_matrices = np.concatenate(reconstructed_matrices, axis=0)
 
     log_mape_between_subjects_and_region_rank(
-        writer, original_matrices, reconstructed_matrices)
+        writer, original_matrices, reconstructed_matrices, experiment_dir)
     log_correlations_between_subjects(
         writer, original_matrices, reconstructed_matrices)
 
