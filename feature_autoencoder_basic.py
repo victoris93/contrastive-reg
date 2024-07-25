@@ -224,7 +224,7 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
     num_subjects = y_true.shape[0]
     matrix_size = y_true.shape[1]
     
-    # Initialize matrix to store MAPE values
+    ##Calculating MAPE matrix
     mape_matrix = np.zeros((matrix_size, matrix_size))
     
     for i in range(matrix_size):
@@ -234,11 +234,9 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
                 true_val = y_true[subj, i, j]
                 pred_val = y_pred[subj, i, j]
                 
-                # Add epsilon to denominator to avoid division by zero
                 mape = (np.abs((true_val - pred_val)) / (np.abs(true_val) + eps)) * 100.0
                 mapes.append(mape)
             
-            # Average MAPE for each element across subjects
             mean_mape = np.mean(mapes)
             mape_matrix[i, j] = mean_mape
             mape_matrix[j, i] = mean_mape 
@@ -247,7 +245,6 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
     atlas = datasets.fetch_atlas_schaefer_2018(n_rois=100)
     atlas_labels = atlas['labels']
     row_sum = mape_matrix.sum(axis=1)
-    
     df = pd.DataFrame({
     'Region': atlas_labels,
     'MAPE_Sum': row_sum
@@ -260,19 +257,12 @@ def log_mape_between_subjects_and_region_rank(writer, y_true, y_pred):
     
     ##Log the MAPE matrix 
     display = plot_matrix(mape_matrix, figure=(10, 8), vmin=0, vmax=300, colorbar=True, cmap='viridis')
-    
-    # Save the plot to a temporary file
     temp_file = f"temp_mape_matrix.png"
     display.figure.savefig(temp_file)
-    
-    
     img = Image.open(temp_file).convert('RGB')
     img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
     img_tensor = torch.tensor(img).permute(2, 0, 1) 
-    
     writer.add_image('Metrics/MAPE matrix', img_tensor)
-
-    # Remove the temporary file
     os.remove(temp_file)
 
 
@@ -300,7 +290,7 @@ def log_correlations_between_subjects(writer, y_true, y_pred):
     display = plot_matrix(correlation_matrix, figure=(5, 4), vmin=-1, vmax=1, colorbar=True)
     temp_file = f"temp_corr_matrix.png"
     display.figure.savefig(temp_file)
-    #display.close()
+    
     # Log the plot to TensorBoard
     img = Image.open(temp_file).convert('RGB')
     img = np.array(img).astype(np.float32) / 255.0  # Normalize to [0, 1]
@@ -432,7 +422,6 @@ def main(cfg: DictConfig):
     train_dataset = Subset(dataset, train_idx)
     test_dataset = Subset(dataset, test_idx)
 
-    #train_features = dataset.matrices[train_idx]
 
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
     fold_models = []
