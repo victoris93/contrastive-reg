@@ -8,10 +8,8 @@ from pathlib import Path
 import gc
 from collections import defaultdict
 from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
-# import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-# import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.optim as optim
