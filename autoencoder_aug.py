@@ -289,7 +289,9 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
         optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
     else:
         raise ValueError("Unsupported loss function specified in config")
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder, factor=0.1, patience = 5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder,
+                                                     factor=0.1,
+                                                     patience = cfg.scheduler_patience)
     
     loss_terms = []
     perf_metrics = []

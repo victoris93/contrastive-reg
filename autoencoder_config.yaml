@@ -1,5 +1,5 @@
 
-experiment_name: "ae_xp1"
+experiment_name: "ae_loss_mse"
 hypothesis: "Testing basic autoencoder configuration"
 # Training parameters
 multi_gpu: True
@@ -9,6 +9,7 @@ kfolds: 5
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
+scheduler_patience: 10
 
 # Model dimensions
 input_dim_feat: 400
