@@ -45,9 +45,14 @@ class MLP(nn.Module):
         dropout_rate,
     ):
         super(MLP, self).__init__()
+        
+        self.output_dim_feat = output_dim_feat
+        A = np.random.rand(self.output_dim_feat, self.output_dim_feat)
+        A = (A + A.T) / 2
+        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A, discard_diagonal = True))
 
         # ENCODE MATRICES
-        self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat ,bias=False)
+        self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=ß ,bias=False)
         self.enc_mat2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat, bias=False)
         self.enc_mat2.weight = torch.nn.Parameter(self.enc_mat1.weight)
         
@@ -77,7 +82,7 @@ class MLP(nn.Module):
         self.init_weights(self.decode_target)
         
         self.feat_to_target_embedding = nn.Sequential(
-            nn.Linear(1225, hidden_dim_feat),
+            nn.Linear(self.vectorized_feat_emb_dim, hidden_dim_feat),
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
