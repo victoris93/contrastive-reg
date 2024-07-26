@@ -1,0 +1,56 @@
+
+experiment_name: "main_model_loss_norm"
+hypothesis: "Contrastive learning with norm loss"
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 50
+hidden_dim_feat: 1000
+input_dim_target: 3
+output_dim_target: 2
+
+# Training parameters
+multi_gpu: True
+num_epochs: 100
+batch_size: 32
+experiments: 20
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+scheduler_patience: 10
+test_ratio: 0.2
+
+# Contrastive loss parameters
+SupCon_kernel: multivariate_cauchy
+
+## feature proj vs. targets
+pft_base_temperature: 10
+pft_temperature: 10
+pft_sigma: 50
+
+## target proj vs. targets
+ptt_base_temperature: 10
+ptt_temperature: 10
+ptt_sigma: 50
+
+# Other losses
+feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
+joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
+target_decoding_crit: MSE  # Options: Norm, MSE
+target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
+
+augmentation: None
+mat_threshold: 0
+# Paths for data
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"
+targets:
+    - cbcl_scr_syn_thought_r
+    - cbcl_scr_syn_internal_r
+    - cbcl_scr_syn_external_r
+
+# Directory for saving results
+working_dir: '/well/margulies/users/cpy397/contrastive-learning'
+reconstructed_dir : recon_mat
+model_weight_dir : saved_models
+tensorboard_dir: tensorboard
+output_dir: '/well/margulies/users/cpy397/contrastive-learning/results'
