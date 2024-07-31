@@ -1,6 +1,6 @@
-project: "basic feature autoencoder"
+project: "logeigen feature autoencoder"
 experiment_name: "xp6"
-hypothesis: "test wandb : tt gérer depuis config file + hyperparamètres sur wandb"
+hypothesis: "premier essai en appliquant log to eigenvals d'original matrices"
 # Training parameters
 num_epochs: 1
 batch_size: 32
