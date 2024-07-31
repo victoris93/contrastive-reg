@@ -370,11 +370,10 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
     model.train()
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
-            optimizer_autoencoder.zero_grad()
             recon_loss = 0
             loss_terms_batch = defaultdict(lambda: 0)
             for features, targets in train_loader:
-
+                optimizer_autoencoder.zero_grad()
                 features = features.to(device)
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
