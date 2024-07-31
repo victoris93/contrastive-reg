@@ -1,5 +1,7 @@
 """
-Python script for the feature autoencoder with a basic implementation of D'Souza's bilinear layer. 
+Python script for the feature autoencoder with D'Souza's bilinear layer with 
+the exponential applied to the reconstructed matrices to match the log normal distribution with a left tail 
+of the original matrices. 
 
 """
 
@@ -36,6 +38,7 @@ from hydra.utils import get_original_cwd
 import shutil
 from nilearn import datasets
 import tabulate
+import pytorch_lightning as pl
 
 #from torch.utils.tensorboard import SummaryWriter
 
@@ -367,6 +370,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                 features = features.to(device)
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
+                reconstructed_feat = (-torch.exp(reconstructed_feat)+2.2)
                 loss = recon_loss + criterion(features, reconstructed_feat)
                 loss.backward()
                 optimizer_autoencoder.step()
@@ -386,6 +390,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
                     eye = torch.eye(features.size(-1), device=device)
                     embedded_feat = model.encode_feat(features)
                     reconstructed_feat = model.decode_feat(embedded_feat)
+                    reconstructed_feat = (-torch.exp(reconstructed_feat)+2.2)
                     val_loss += criterion(features, reconstructed_feat)
                     val_mean_corr += mean_correlations_between_subjects(
                         features, reconstructed_feat)
@@ -513,6 +518,7 @@ def main(cfg: DictConfig):
             eye = torch.eye(features.size(-1), device=device)
             embedded_feat = model.encode_feat(features)
             reconstructed_feat = model.decode_feat(embedded_feat)
+            reconstructed_feat = (-torch.exp(reconstructed_feat)+2.2)
             original_matrices.append(features.cpu().numpy())
             reconstructed_matrices.append(reconstructed_feat.cpu().numpy())
             test_loss += criterion(features, reconstructed_feat)
