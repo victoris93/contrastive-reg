@@ -1,0 +1,29 @@
+project: "logeigen feature autoencoder"
+experiment_name: "xp1"
+hypothesis: "premier essai en appliquant exp aux reconstructions"
+# Training parameters
+num_epochs: 1
+batch_size: 32
+learning_rate: 0.001
+weight_decay: 0
+dropout_rate: 0
+
+# Model dimensions
+input_dim_feat: 100
+output_dim_feat: 10
+
+# Loss function and optimizer
+loss_function: Norm  # Options: LogEuclidean, Norm
+
+# Paths for data
+path_feat: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/conn_camcan_without_nan/stacked_mat.npy"  
+path_targets: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/target_without_nan.csv"  
+
+# Directory for saving results
+original_dir: original
+reconstructed_dir : reconstructed
+tensorboard_dir: tensorboard
+weight_dir : weights
+
+branch_name: feat_ae_basic
+output_dir: /data/parietal/store2/work/mrenaudi/contrastive-reg-3/hydra/${branch_name}
