@@ -228,6 +228,8 @@ def mean_correlations_between_subjects(y_true, y_pred):
     correlation = np.mean(correlations)
 
     return correlation
+    
+
 
 
 # %%
@@ -314,6 +316,73 @@ def log_correlations_between_subjects(wandb, y_true, y_pred):
     display.figure.savefig(temp_file)
     wandb.log({'Correlation Matrix': wandb.Image(temp_file)})
     os.remove(temp_file)
+
+def plot_correlation_distributions(wandb, original_matrices, reconstructed_matrices):
+    # Load the Schaefer atlas
+    atlas = datasets.fetch_atlas_schaefer_2018(n_rois=100)
+    atlas_labels = atlas['labels']
+    
+    # Decode bytes-like objects if necessary
+    if isinstance(atlas_labels[0], bytes):
+        atlas_labels = [label.decode('utf-8') for label in atlas_labels]
+
+    # Generate network indices from labels using network names
+    network_indices = {}
+    for idx, label in enumerate(atlas_labels):
+        try:
+            # Split the label and extract the network name (assuming it's the third part)
+            parts = label.split('_')
+            if len(parts) > 2:
+                network_name = parts[2]  # Extract the network name (third part)
+                if network_name not in network_indices:
+                    network_indices[network_name] = []
+                network_indices[network_name].append(idx)
+        except Exception as e:
+            print(f"Error processing label '{label}': {e}")
+
+    # Function to get correlation values within the same network for multiple subjects
+    def find_corr_per_network(matrices, network_indices):
+        network_correlations = {network_name: [] for network_name in network_indices.keys()}
+
+        num_subjects = matrices.shape[0]
+        for subject_idx in range(num_subjects):
+            matrix = matrices[subject_idx]
+            for network_name, indices in network_indices.items():
+                for i in range(len(indices)):
+                    for j in range(i):
+                        network_correlations[network_name].append(matrix[indices[i], indices[j]])
+
+        return network_correlations
+
+    # Compute aggregated correlations for both original and reconstructed matrices
+    original_aggregated = find_corr_per_network(original_matrices, network_indices)
+    reconstructed_aggregated = find_corr_per_network(reconstructed_matrices, network_indices)
+    
+    network_names = list(network_indices.keys())
+    num_networks = len(network_names)
+    
+    fig, axes = plt.subplots(num_networks, 1, figsize=(10, 6 * num_networks), sharex=True)
+    
+    for ax, network_name in zip(axes, network_names):
+        sns.kdeplot(original_aggregated[network_name], color='blue', alpha=0.5, label='Original', ax=ax, fill=True)
+        sns.kdeplot(reconstructed_aggregated[network_name], color='red', alpha=0.5, label='Reconstructed', ax=ax, fill=True)
+        ax.set_title(f'Correlation Distribution in {network_name} Network')
+        ax.set_xlabel('Correlation')
+        ax.set_ylabel('Density')
+        ax.legend()
+    
+    plt.tight_layout()
+    
+    # Save plot to a file
+    plot_file_path = 'correlation_distributions.png'
+    plt.savefig(plot_file_path)
+    plt.close(fig)  # Close the figure to free memory
+    
+
+    wandb.log({"Correlation Distributions": wandb.Image(plot_file_path)})
+    
+    # Optionally remove the file after logging
+    os.remove(plot_file_path)
 
 # %%
 
@@ -531,6 +600,8 @@ def main(cfg: DictConfig):
     log_mape_between_subjects_and_region_rank(
         wandb, original_matrices, reconstructed_matrices, experiment_dir)
     log_correlations_between_subjects(
+        wandb, original_matrices, reconstructed_matrices)
+    plot_correlation_distributions(
         wandb, original_matrices, reconstructed_matrices)
 
     wandb.finish()
