@@ -1,8 +1,8 @@
-project: "logeigen feature autoencoder"
-experiment_name: "xp6"
-hypothesis: "premier essai en appliquant log to eigenvals d'original matrices"
+project: "feature autoencoder"
+experiment_name: "test logeigen"
+hypothesis: "try with logeigen : norm loss, 100 epochs"
 # Training parameters
-num_epochs: 1
+num_epochs: 100
 batch_size: 32
 learning_rate: 0.001
 weight_decay: 0

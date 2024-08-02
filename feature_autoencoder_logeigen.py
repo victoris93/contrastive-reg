@@ -1,9 +1,9 @@
-    """
+"""
     Python script for the feature autoencoder with D'Souza's layer 
     + applying logarithm to the eigenvalues of the original matrices to normalize the distribution 
     while maintaining SPD structure.
     
-    """
+"""
 # %%
 import wandb
 import math
@@ -36,7 +36,7 @@ from hydra.utils import get_original_cwd
 import shutil
 from nilearn import datasets
 import tabulate
-import pytorch_lightning as pl
+#import pytorch_lightning as pl
 
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -424,7 +424,7 @@ def train_autoencoder(train_dataset, val_dataset, B_init_fMRI, model=None, devic
 
 
 # %%
-@hydra.main(config_path=".", config_name="config_feature_autoencoder_basic")
+@hydra.main(config_path=".", config_name="config_feature_autoencoder_logeigen")
 def main(cfg: DictConfig):
     # Print configuration to track what is being used
     print(OmegaConf.to_yaml(cfg))
@@ -441,10 +441,10 @@ def main(cfg: DictConfig):
     # Get the original working directory where Hydra started
     config_path = get_original_cwd()
     config_file = os.path.join(
-        config_path, 'config_feature_autoencoder_basic.yaml')
+        config_path, 'config_feature_autoencoder_logeigen.yaml')
     if os.path.exists(config_file):
         shutil.copy(config_file, os.path.join(experiment_dir,
-                    'config_feature_autoencoder_basic.yaml'))
+                    'config_feature_autoencoder_logeigen.yaml'))
     else:
         print(f"Config file {config_file} does not exist.")
 
