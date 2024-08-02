@@ -36,6 +36,8 @@ from hydra.utils import get_original_cwd
 import shutil
 from nilearn import datasets
 import tabulate
+import seaborn as sns
+
 #import pytorch_lightning as pl
 
 torch.cuda.empty_cache()
@@ -613,7 +615,7 @@ def main(cfg: DictConfig):
     plot_correlation_distributions(
         wandb, original_matrices, reconstructed_matrices)
 
-    wandb.finish()
+    wandb.finish() 
     # Save original and reconstructed matrices
     original_path = os.path.join(
         experiment_dir, cfg.original_dir, f"Original.npy")
