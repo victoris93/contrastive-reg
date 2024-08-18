@@ -29,6 +29,7 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
 from torch.utils.tensorboard import SummaryWriter
+import sys
 
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,10 +96,11 @@ class AutoEncoder(nn.Module):
         input_dim_feat,
         output_dim_feat,
         B_init_fMRI,
-        dropout_rate
+        dropout_rate,
+        cfg
     ):
         super(AutoEncoder, self).__init__()
-        
+        self.cfg = cfg
         # ENCODE MATRICES
         self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat ,bias=False)
         self.enc_mat2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat, bias=False)
@@ -111,16 +113,33 @@ class AutoEncoder(nn.Module):
         self.dec_mat2.weight = torch.nn.Parameter(self.dec_mat1.weight)
         self.dropout = nn.Dropout(p=dropout_rate)
         
-        
     def encode_feat(self, x):
+        rect = self.cfg.ReEig
         z_n = self.enc_mat1(x)
         c_hidd_fMRI = self.enc_mat2(z_n.transpose(1,2))
+        if rect:
+            reig = ReEig()
+            c_hidd_fMRI = reig(c_hidd_fMRI)
+        
         return c_hidd_fMRI
     
     def decode_feat(self,c_hidd_mat):
         z_n = self.dec_mat1(c_hidd_mat).transpose(1,2)
         recon_mat = self.dec_mat2(z_n)
         return recon_mat
+
+class ReEig(nn.Module):
+    def __init__(self, epsilon=1e-4):
+        super(ReEig, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, X):
+        D, V = torch.linalg.eigh(X)
+        D = torch.clamp(D, min=self.epsilon)
+        X_rectified = V @ torch.diag_embed(D) @ V.transpose(-2, -1)
+        
+        return X_rectified
+
 
 class MatData(Dataset):
     def __init__(self, dataset_path, target_names, threshold=0):
@@ -173,34 +192,34 @@ def mean_absolute_percentage_error(y_true, y_pred):
 
 
 def mape_between_subjects(y_true, y_pred):
-        eps = 1e-6
-        mapes = []
-        y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
-        y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
-        
-        num_subjects = y_true.shape[0]
-        matrix_size = y_true.shape[1]
-        
-        # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
-        upper_true = []
-        upper_pred = []
-        
-        for subj in range(num_subjects):
-            for i in range(matrix_size):
-                for j in range(i + 1, matrix_size):
-                    true_val = y_true[subj, i, j]
-                    pred_val = y_pred[subj, i, j]
-                    
-                    # Add epsilon to denominator to avoid division by zero
-                    mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
-                    upper_true.append(true_val)
-                    upper_pred.append(pred_val)
-                    mapes.append(mape)
-        
-        # Calculate mean MAPE
-        mean_mape = np.mean(mapes)
-        
-        return mean_mape
+    eps = 1e-6
+    mapes = []
+    y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+    y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
+
+    num_subjects = y_true.shape[0]
+    matrix_size = y_true.shape[1]
+
+    # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
+    upper_true = []
+    upper_pred = []
+
+    for subj in range(num_subjects):
+        for i in range(matrix_size):
+            for j in range(i + 1, matrix_size):
+                true_val = y_true[subj, i, j]
+                pred_val = y_pred[subj, i, j]
+
+                # Add epsilon to denominator to avoid division by zero
+                mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
+                upper_true.append(true_val)
+                upper_pred.append(pred_val)
+                mapes.append(mape)
+
+    # Calculate mean MAPE
+    mean_mape = np.mean(mapes)
+
+    return mean_mape
 
 
 def mean_correlation(y_true, y_pred):
@@ -267,7 +286,8 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
             input_dim_feat,
             output_dim_feat,
             B_init_fMRI,
-            dropout_rate
+            dropout_rate,
+            cfg
         ).to(device)
         
     model.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
@@ -298,11 +318,11 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
     model.train()
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
-            optimizer_autoencoder.zero_grad()
             recon_loss = 0
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
                 
+                optimizer_autoencoder.zero_grad()
                 features = features.to(device)
                 
                 embedded_feat = model.encode_feat(features)
@@ -350,7 +370,6 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
     print(loss_terms)
     
     return loss_terms, model.state_dict(), val_loss.item()
-
 
 
 class FoldTrain(submitit.helpers.Checkpointable):
@@ -445,7 +464,7 @@ def main(cfg: DictConfig):
         with executor.batch():
             for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
                 run_train_fold = FoldTrain()
-                job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset, random_state = random_state, model_params_dir = model_params_dir, cfg =cfg)
+                job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset, model_params_dir = model_params_dir, cfg =cfg, random_state = random_state)
                 fold_jobs.append(job)
 
         async def get_result(fold_jobs):
@@ -459,7 +478,7 @@ def main(cfg: DictConfig):
         fold_results = []
         for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
             run_train_fold = FoldTrain()
-            job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state, cfg = cfg)
+            job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state, model_params_dir = model_params_dir, cfg = cfg)
             fold_results.append(job)
     # TEST
     folds = [fold_dict["fold"] for fold_dict in fold_results]
@@ -478,8 +497,9 @@ def main(cfg: DictConfig):
             input_dim_feat,
             output_dim_feat,
             torch.randn(input_dim_feat, output_dim_feat),
-            dropout_rate
-        ).to(device)
+            dropout_rate,
+            cfg
+            ).to(device)
     model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}.pth"))  # Load the best fold weights
     
     model.eval()
