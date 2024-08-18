@@ -10,6 +10,7 @@ lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
+ReEig: False
 
 # Model dimensions
 input_dim_feat: 400
