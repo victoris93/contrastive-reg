@@ -1,0 +1,32 @@
+project: "AE multigpu"
+experiment_name: "ae_ReEig_loss_norm"
+hypothesis: "corr with ReEig > corr without ReEig"
+# Training parameters
+multi_gpu: True
+num_epochs: 100
+batch_size: 32
+kfolds: 5
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+scheduler_patience: 10
+ReEig: True
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 50
+
+# Loss function and optimizer
+loss_function: Norm  # Options: LogEuclidean, Norm, MSE
+
+# Paths for data
+dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/abcd_dataset_400parcels.nc"  
+targets:
+    - cbcl_scr_syn_thought_r
+    - cbcl_scr_syn_internal_r
+    - cbcl_scr_syn_external_r
+# Directory for saving results
+reconstructed_dir : recon_mat
+model_weight_dir : saved_models
+tensorboard_dir: tensorboard
+output_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/results"
