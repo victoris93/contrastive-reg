@@ -1,3 +1,4 @@
+import wandb
 import math
 import xarray as xr
 import asyncio
@@ -30,6 +31,7 @@ import random
 from geoopt.optim import RiemannianAdam
 from torch.utils.tensorboard import SummaryWriter
 import sys
+# from viz_func import wandb_plot_corr
 
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -142,7 +144,7 @@ class ReEig(nn.Module):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, threshold=0):
+    def __init__(self, dataset_path, target_names, threshold=THRESHOLD):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
@@ -151,27 +153,24 @@ class MatData(Dataset):
         self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
         if threshold > 0:
             self.matrices = self.threshold_mat(self.matrices, self.threshold)
-        self.matrices = self.transform_matrices(self.matrices)
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
         self.target = torch.from_numpy(np.array([self.data_array[target_name].values for target_name in self.target_names]).T).to(torch.float32)
 
         gc.collect()
 
-    def transform_matrices(self, matrices):
-        transformed_matrices = []
-        for matrix in matrices:
-            eigenvalues, eigenvectors = np.linalg.eigh(matrix)
-            transformed_eigenvalues = np.log(eigenvalues+ 1)
-            transformed_matrix = eigenvectors @ np.diag(transformed_eigenvalues) @ eigenvectors.T
-            transformed_matrices.append([transformed_matrix*5])
-        transformed_matrices = np.concatenate(transformed_matrices)
-        return transformed_matrices
-    
     def threshold_mat(self, matrices, threshold): # as in Margulies et al. (2016)
         perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
         mask = np.abs(matrices) >= perc
         thresh_mat = matrices * mask
         return thresh_mat
+    
+    def __len__(self):
+        return self.data_array.subject.__len__()
+    
+    def __getitem__(self, idx):
+        matrix = self.matrices[idx]
+        target = torch.from_numpy(np.array([self.data_array.sel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        
     
     def __len__(self):
         return self.data_array.subject.__len__()
@@ -431,9 +430,8 @@ def main(cfg: DictConfig):
     random_state = np.random.RandomState(seed=42)
     
     dataset_path = cfg.dataset_path
-    dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
-                               'cbcl_scr_syn_internal_r',
-                               'cbcl_scr_syn_external_r',], threshold=0)
+    targets = list(cfg.targets)
+    dataset = MatData(dataset_path, targets, threshold=0)
     train_val_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.2, random_state=random_state)
     train_val_dataset = Subset(dataset, train_val_idx)
     test_dataset = Subset(dataset, test_idx)
@@ -447,11 +445,12 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu_short",
-            gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1,
-            cpus_per_task=30
+            slurm_account="ftj@a100",
+            slurm_partition="prepost",
+            # gpus_per_node=1,
+            # tasks_per_node=1,
+            # nodes=1,
+            cpus_per_task=40,
             #slurm_qos="qos_gpu-t3",
             # slurm_constraint="a100",
             #slurm_mem="10G",
@@ -500,12 +499,16 @@ def main(cfg: DictConfig):
             dropout_rate,
             cfg
             ).to(device)
+    
     model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}.pth"))  # Load the best fold weights
     
     model.eval()
     test_loss = 0
     test_mean_corr = 0
     test_mape = 0
+    
+    # wandb.init(project=cfg.project, mode = "offline", name=cfg.experiment_name, dir = "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/results")
+    # wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
     
     if cfg.loss_function == 'LogEuclidean':
             criterion = LogEuclideanLoss()
@@ -527,6 +530,7 @@ def main(cfg: DictConfig):
             np.save(f'{recon_mat_dir}/recon_mat_fold{best_fold}_batch_{i+1}', reconstructed_feat.cpu().numpy())
             mape_mat = torch.abs((features - reconstructed_feat) / (features + 1e-10)) * 100
             np.save(f'{recon_mat_dir}/mape_mat_fold{best_fold}_batch_{i+1}', mape_mat.cpu().numpy())
+            # wandb_plot_corr(wandb, features.cpu().numpy(), reconstructed_feat.cpu().numpy())
 
             test_loss += criterion(features,reconstructed_feat)
             test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
@@ -536,6 +540,7 @@ def main(cfg: DictConfig):
             writer.add_scalar('Metric/test_mean_corr', test_mean_corr)
             writer.add_scalar('Metric/test_mape', test_mape)
             writer.close()
+            # wandb.finish()
 
             
     test_loss /= len(test_loader)
