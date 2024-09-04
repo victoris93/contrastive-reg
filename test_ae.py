@@ -96,7 +96,8 @@ def main(cfg: DictConfig):
 
     wandb.init(project=cfg.project, mode = "offline", name=cfg.experiment_name, dir = "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results")
     wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
-
+    
+    best_fold = int(cfg.best_fold)
     torch.cuda.empty_cache()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -115,7 +116,6 @@ def main(cfg: DictConfig):
     model_params_dir = os.path.join(results_dir, cfg.model_weight_dir)
     os.makedirs(model_params_dir, exist_ok=True)
 
-    best_fold = 5
     test(best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
                             recon_mat_dir = recon_mat_dir, wandb = wandb, device = device)
 

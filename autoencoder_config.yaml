@@ -22,6 +22,9 @@ output_dim_feat: 50
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 
+# modify manually if test is run as a separate job
+best_fold: 5
+
 # Paths for data
 dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
 targets:
