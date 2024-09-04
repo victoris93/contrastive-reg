@@ -83,6 +83,12 @@ def mape_between_subjects(y_true, y_pred):
 
     return mean_mape
 
+def mean_absolute_percentage_error(y_true, y_pred):
+    eps = 1e-6
+    return torch.mean(torch.abs((y_true - y_pred)) / torch.abs(y_true)+eps) * 100
+
+
+
 def standardize_dataset(dataset):
     features = torch.vstack([dataset[i][0] for i in range(len(dataset))])
     targets = torch.vstack([dataset[i][1] for i in range(len(dataset))])
