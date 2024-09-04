@@ -1,6 +1,6 @@
-
-experiment_name: "ae_loss_norm"
-hypothesis: "Testing basic autoencoder configuration"
+project: "AE multigpu"
+experiment_name: "ae_skip_loss_norm"
+hypothesis: "corr with skip conn > corr without skip conn"
 # Training parameters
 multi_gpu: True
 num_epochs: 100
@@ -11,6 +11,10 @@ weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 
+# non-linearity enhancements
+ReEig: False
+skip_enc1: True
+
 # Model dimensions
 input_dim_feat: 400
 output_dim_feat: 50
@@ -18,11 +22,18 @@ output_dim_feat: 50
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 
+# modify manually if test is run as a separate job
+best_fold: 5
+
 # Paths for data
-dataset_path: "/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
+targets:
+    - cbcl_scr_syn_thought_r
+    - cbcl_scr_syn_internal_r
+    - cbcl_scr_syn_external_r
 
 # Directory for saving results
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
 tensorboard_dir: tensorboard
-output_dir: '/well/margulies/users/cpy397/contrastive-learning/results'
+output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
