@@ -11,6 +11,8 @@ import random
 from nilearn import datasets
 
 
+# +
+
 class GPC(nn.Module):
     def __init__(self, in_dim, out_dim, node):
         super(GPC, self).__init__()
@@ -31,6 +33,8 @@ class GPC(nn.Module):
         
         return x
 
+
+# -
 
 def gpc(matrix, in_dim, out_dim, node):
     gpc_mat = torch.from_numpy(copy(matrix)).float()
@@ -112,6 +116,7 @@ def flip_edges(matrix, edge_idx, vectorize_mat=False):
         
     return flipped_matrix
 
+
 def extract_label_idx(substring):
     schaefer_1000 = datasets.fetch_atlas_schaefer_2018(n_rois=1000, yeo_networks=7, resolution_mm=1)
     labels = schaefer_1000['labels']
@@ -140,6 +145,8 @@ def isolate_network(matrix, string, mode = "extract"):
     return matrix
 
 
+# +
+
 augs = {
     "random_threshold_augmentation": random_threshold_augmentation,
     "flipping_threshold_augmentation": flipping_threshold_augmentation,
@@ -147,7 +154,9 @@ augs = {
     "gpc": gpc,
     "isolate_network": isolate_network,
     "mixup": mixup
-}
+    "gpc": gpc
+    }
+# -
 
 aug_args = {
     "random_threshold_augmentation": {"threshold": 60,"bound" : 1},
@@ -156,4 +165,5 @@ aug_args = {
     "gpc" : {"in_dim": 1, "out_dim": 1, 'node' : 1000},
     "isolate_network" : {"string" : "Default"},
     "mixup" : {"threshold": 60}
-}
+    "gpc" : {"in_dim": 1, "out_dim": 1, 'node' : 1000}
+    }
