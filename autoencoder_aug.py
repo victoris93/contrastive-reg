@@ -116,8 +116,11 @@ class AutoEncoder(nn.Module):
         self.dropout = nn.Dropout(p=dropout_rate)
         
     def encode_feat(self, x):
+
         rect = self.cfg.ReEig
         z_n = self.enc_mat1(x)
+        self.skip_enc_mat1 = z_n.detach().clone()
+
         c_hidd_fMRI = self.enc_mat2(z_n.transpose(1,2))
         if rect:
             reig = ReEig()
@@ -126,8 +129,15 @@ class AutoEncoder(nn.Module):
         return c_hidd_fMRI
     
     def decode_feat(self,c_hidd_mat):
+
+        skip_enc1 = self.cfg.skip_enc1
         z_n = self.dec_mat1(c_hidd_mat).transpose(1,2)
+
+        if skip_enc1: # long skip conn
+            z_n += self.skip_enc_mat1
+        
         recon_mat = self.dec_mat2(z_n)
+
         return recon_mat
 
 class ReEig(nn.Module):
@@ -144,7 +154,7 @@ class ReEig(nn.Module):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, threshold=THRESHOLD):
+    def __init__(self, dataset_path, target_names, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names

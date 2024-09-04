@@ -25,8 +25,9 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 # Paths for data
 dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
 targets:
-    - cbcl_scr_syn_external_r
+    - cbcl_scr_syn_thought_r
     - cbcl_scr_syn_internal_r
+    - cbcl_scr_syn_external_r
 
 # Directory for saving results
 reconstructed_dir : recon_mat
