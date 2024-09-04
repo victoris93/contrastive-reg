@@ -10,11 +10,8 @@ from collections import defaultdict
 from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 import numpy as np
 import pandas as pd
-<<<<<<< HEAD
-=======
 import hydra
 from omegaconf import DictConfig, OmegaConf
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,20 +21,6 @@ from sklearn.model_selection import (
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
-<<<<<<< HEAD
-from augmentations import augs, aug_args
-import glob, os, shutil
-from nilearn.datasets import fetch_atlas_schaefer_2018
-import random
-
-torch.cuda.empty_cache()
-multi_gpu = True
-
-fmri_data_path = '/gpfs3/well/margulies/projects/ABCD/fmriresults01/abcd-mproc-release5'
-
-THRESHOLD = 0
-AUGMENTATION = None
-=======
 # from augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
@@ -45,7 +28,6 @@ import random
 from torch.utils.tensorboard import SummaryWriter
 
 torch.cuda.empty_cache()
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -60,11 +42,6 @@ class MLP(nn.Module):
         dropout_rate,
     ):
         super(MLP, self).__init__()
-<<<<<<< HEAD
-
-        # ENCODE MATRICES
-        self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat ,bias=False)
-=======
         
         self.output_dim_feat = output_dim_feat
         A = np.random.rand(self.output_dim_feat, self.output_dim_feat)
@@ -73,7 +50,6 @@ class MLP(nn.Module):
 
         # ENCODE MATRICES
         self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features= output_dim_feat,bias=False)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
         self.enc_mat2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat, bias=False)
         self.enc_mat2.weight = torch.nn.Parameter(self.enc_mat1.weight)
         
@@ -103,11 +79,7 @@ class MLP(nn.Module):
         self.init_weights(self.decode_target)
         
         self.feat_to_target_embedding = nn.Sequential(
-<<<<<<< HEAD
-            nn.Linear(1225, hidden_dim_feat),
-=======
             nn.Linear(self.vectorized_feat_emb_dim, hidden_dim_feat),
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
             nn.BatchNorm1d(hidden_dim_feat),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
@@ -177,8 +149,6 @@ class MatData(Dataset):
         
         return matrix, target
 
-<<<<<<< HEAD
-=======
 class LogEuclideanLoss(nn.Module):
     def __init__(self):
         super(LogEuclideanLoss, self).__init__()
@@ -234,7 +204,6 @@ class NormLoss(nn.Module):
         loss = torch.norm(features - recon_features) ** 2
         return loss
 
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR
@@ -392,13 +361,6 @@ class KernelizedSupCon(nn.Module):
 
 def gaussian_kernel(x, krnl_sigma):
     x = x - x.T
-<<<<<<< HEAD
-    return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (math.sqrt(2 * torch.pi))
-
-def gaussian_kernel_original(x, krnl_sigma):
-    x = x - x.T
-=======
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
     return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (
         math.sqrt(2 * torch.pi) * krnl_sigma
     )
@@ -411,22 +373,6 @@ def multivariate_cauchy(x, krnl_sigma):
     x = torch.cdist(x, x)
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
-<<<<<<< HEAD
-def train(train_dataset, test_dataset, mean, std, B_init_fMRI, model=None, device=device, kernel=multivariate_cauchy, num_epochs=200, batch_size=32):
-    input_dim_feat = 400
-    input_dim_target = 3
-    # the rest is arbitrary
-    hidden_dim_feat = 1000
-    
-    
-    output_dim_target = 2
-    output_dim_feat = 50
-    
-    lr = 0.001  # too low values return nan loss
-    batch_size = 32  # too low values return nan loss
-    dropout_rate = 0
-    weight_decay = 0
-=======
 EMB_LOSSES ={
     'Norm': NormLoss(),
     'LogEuclidean': LogEuclideanLoss(),
@@ -457,7 +403,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
     dropout_rate = cfg.dropout_rate
     weight_decay = cfg.weight_decay
     num_epochs = cfg.num_epochs
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
@@ -478,15 +423,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
     model.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
 
     criterion_pft = KernelizedSupCon(
-<<<<<<< HEAD
-        method="expw", temperature=10, base_temperature=10, kernel=kernel, krnl_sigma=50
-    )
-    criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=10, base_temperature=10, kernel=kernel, krnl_sigma=50
-    )
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1)
-=======
         method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
     )
     criterion_ptt = KernelizedSupCon(
@@ -500,7 +436,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
     loss_terms = []
     validation = []
@@ -509,26 +444,17 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
     torch.cuda.empty_cache()
     gc.collect()
 
-<<<<<<< HEAD
-    print("Starting training...")
-=======
     tensorboard_dir = os.path.join(cfg.output_dir,cfg.experiment_name, cfg.tensorboard_dir)
     os.makedirs(tensorboard_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=cfg.tensorboard_dir)
     writer.add_scalar('Experiment', experiment + 1)
     writer.add_scalar('Train_ratio', train_ratio)
 
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
-<<<<<<< HEAD
-                bsz = targets.shape[0]
-                n_feat = features.shape[-1]
-=======
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
                 
                 optimizer.zero_grad()
                 features = features.to(device)
@@ -540,24 +466,13 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 ## FEATURE DECODING
                 reconstructed_feat = model.decode_feat(embedded_feat)
                 ## FEATURE DECODING LOSS
-<<<<<<< HEAD
-                feature_autoencoder_loss = nn.functional.mse_loss(features, reconstructed_feat)
-=======
                 feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
                 reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)                
                 out_target = model.transform_targets(targets)
-<<<<<<< HEAD
-                joint_embedding_loss = 100 * nn.functional.cosine_embedding_loss(reduced_feat_embedding,
-                                                                            out_target,
-                                                                            torch.ones(out_target.shape[0]).to(device)
-                                                                            )
-                ## KERNLIZED LOSS: reduced feat embedding vs targets
-=======
 
                 if cfg.joint_embedding_crit == 'cosine':
                     joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
@@ -569,7 +484,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                                                                       out_target
                                                                       )
                 
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
                 kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
 
                 ## TARGET DECODING FROM TARGET EMBEDDING
@@ -579,21 +493,13 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 kernel_embedded_target_loss = criterion_ptt(out_target.unsqueeze(1), targets)
                 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-<<<<<<< HEAD
-                target_decoding_loss = 10*nn.functional.mse_loss(targets, out_target_decoded)
-=======
                 target_decoding_loss = 10*target_decoding_crit(targets, out_target_decoded)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
                 ## TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
                 target_decoded_from_reduced_emb = model.decode_target(reduced_feat_embedding)
 
                 ## LOSS: TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
-<<<<<<< HEAD
-                target_decoding_from_reduced_emb_loss = 100*nn.functional.mse_loss(targets, target_decoded_from_reduced_emb)
-=======
                 target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
                 ## SUM ALL LOSSES
                 loss = feature_autoencoder_loss + kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
@@ -602,15 +508,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
-<<<<<<< HEAD
-                loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                loss_terms_batch['feature_autoencoder_loss'] += feature_autoencoder_loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_feature_loss'] += kernel_embedded_feature_loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_target_loss'] += kernel_embedded_target_loss.item() / len(train_loader)
-                loss_terms_batch['joint_embedding_loss'] += joint_embedding_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_loss'] += target_decoding_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_from_reduced_emb_loss'] += target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-=======
                 
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 writer.add_scalar('Loss/loss', loss_terms_batch['loss'], epoch)
@@ -632,31 +529,11 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
 
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] += target_decoding_from_reduced_emb_loss.item() / len(train_loader)
                 writer.add_scalar('Loss/target_decoding_from_reduced_emb_loss', loss_terms_batch['target_decoding_from_reduced_emb_loss'], epoch)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 
             loss_terms_batch['epoch'] = epoch
             loss_terms.append(loss_terms_batch)
 
             model.eval()
-<<<<<<< HEAD
-            mae_batch = 0
-            with torch.no_grad():
-                for (features, targets) in test_loader:
-                    
-                    features, targets = features.to(device), targets.to(device)
-                    # targets = targets*std - mean
-                    
-                    out_feat = model.encode_feat(features)
-                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
-                    transfer_out_feat = model.transfer_embedding(out_feat)
-                    
-                    out_target_decoded = model.decode_target(transfer_out_feat)
-                    # out_target_decoded = out_target_decoded*std-mean
-                    
-                    mae_batch += (targets - out_target_decoded).abs().mean() / len(test_loader)
-                validation.append(mae_batch.item())
-            scheduler.step(mae_batch)
-=======
             mape_batch = 0
             with torch.no_grad():
                 for (features, targets) in test_loader:
@@ -675,7 +552,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
 
                 validation.append(mape_batch)
             scheduler.step(mape_batch)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
             if np.log10(scheduler._last_lr[0]) < -4:
                 break
 
@@ -683,11 +559,7 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
             pbar.set_postfix_str(
                 f"Epoch {epoch} "
                 f"| Loss {loss_terms[-1]['loss']:.02f} "
-<<<<<<< HEAD
-                f"| val MAE {validation[-1]:.02f}"
-=======
                 f"| val MAPE {validation[-1]:.02f}"
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
             )
     loss_terms = pd.DataFrame(loss_terms)
@@ -706,11 +578,7 @@ class Experiment(submitit.helpers.Checkpointable):
         self.results = None
         self.embeddings = None 
 
-<<<<<<< HEAD
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=None, device=None, path: Path = None):
-=======
     def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, cfg, random_state=None, device=None, path: Path = None):
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -718,14 +586,11 @@ class Experiment(submitit.helpers.Checkpointable):
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
 
-<<<<<<< HEAD
-=======
             augmentations = cfg.augmentation
 
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
     
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
             predictions = {}
             autoencoder_features = {}
             losses = []
@@ -741,13 +606,8 @@ class Experiment(submitit.helpers.Checkpointable):
             train_targets, mean, std= standardize(train_targets)
 
             ## Weight initialization for bilinear layer
-<<<<<<< HEAD
-            input_dim_feat =400
-            output_dim_feat = 50
-=======
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
             mean_f = torch.mean(train_features, dim=0).to(device)
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
@@ -756,11 +616,7 @@ class Experiment(submitit.helpers.Checkpointable):
             test_targets = (test_targets-mean)/std
 
             ### Augmentation
-<<<<<<< HEAD
-            if augmentations is not None:
-=======
             if augmentations != 'None':
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
 #                 aug_params = {}
                 if not isinstance(augmentations, list):
                     augmentations = [augmentations]
@@ -789,11 +645,7 @@ class Experiment(submitit.helpers.Checkpointable):
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-<<<<<<< HEAD
-            loss_terms, model = train(train_dataset, test_dataset,mean, std, B_init_fMRI, device=device)
-=======
             loss_terms, model = train(experiment, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
@@ -812,17 +664,10 @@ class Experiment(submitit.helpers.Checkpointable):
                     y_embedded = model.transform_targets(y)
                                         
                     if label == 'test' and train_ratio == 1.0:
-<<<<<<< HEAD
-                        recon_mat = model.decode_feat(X_embedded).cpu().numpy()
-                        mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
-                        np.save(f'results/multivariate/abcd/recon_mat/recon_mat_exp{experiment}', recon_mat)
-                        np.save(f'results/multivariate/abcd/recon_mat/mape_mat_exp{experiment}', mape_mat.cpu().numpy())
-=======
                         recon_mat = model.decode_feat(X_embedded)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         np.save(f'{recon_mat_dir}/recon_mat_exp{experiment}', recon_mat.cpu().numpy())
                         np.save(f'{recon_mat_dir}/mape_mat_exp{experiment}', mape_mat.cpu().numpy())
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
                         
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
@@ -854,128 +699,6 @@ class Experiment(submitit.helpers.Checkpointable):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
-<<<<<<< HEAD
-random_state = np.random.RandomState(seed=42)
-
-dataset_path = "ABCD/abcd_dataset_400parcels.nc"
-dataset = MatData(dataset_path, ['cbcl_scr_syn_thought_r',
-                           'cbcl_scr_syn_internal_r',
-                           'cbcl_scr_syn_external_r',], threshold=THRESHOLD)
-n_sub = len(dataset)
-test_ratio = .2
-test_size = int(test_ratio * n_sub)
-indices = np.arange(n_sub)
-experiments = 20
-
-if multi_gpu:
-    log_folder = Path("log_folder")
-    executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
-    executor.update_parameters(
-        timeout_min=120,
-        slurm_partition="gpu_short",
-        gpus_per_node=1,
-        tasks_per_node=1,
-        nodes=1,
-        cpus_per_task=30
-        #slurm_constraint="v100-32g",
-
-    )
-    experiment_jobs = []
-
-    with executor.batch():
-        for train_ratio in tqdm(np.linspace(.1, 1., 5)):
-            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-            experiment_size = test_size + train_size
-            for experiment in tqdm(range(experiments)):
-                run_experiment = Experiment()
-                job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
-                experiment_jobs.append(job)
-
-    async def get_result(experiment_jobs):
-        experiment_results = []
-        for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
-            res = await aws
-            experiment_results.append(res)
-        return experiment_results
-    experiment_results = asyncio.run(get_result(experiment_jobs))
-
-else:
-    experiment_results = []
-    
-    for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
-        train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-        experiment_size = test_size + train_size
-        for experiment in tqdm(range(experiments), desc="Experiment"):
-            run_experiment = Experiment()
-            job = run_experiment(train,  test_size, indices, train_ratio, experiment_size, experiment, dataset, augmentations = AUGMENTATION, random_state=random_state, device=None)
-            experiment_results.append(job)
-
-losses, predictions, embeddings = zip(*experiment_results)
-
-prediction_metrics = predictions[0]
-for prediction in predictions[1:]:
-    prediction_metrics.update(prediction)
-
-pred_results = []
-for k, v in prediction_metrics.items():
-    true_targets, predicted_targets, indices = v
-    true_targets = pd.DataFrame({"train_ratio": [k[0]] * len(true_targets),
-                                 "experiment":[k[1]] * len(true_targets),
-                                 "dataset":[k[2]] * len(true_targets),
-                                 "cbcl_scr_syn_thought_r": true_targets[:, 0],
-                                 "cbcl_scr_syn_internal_r": true_targets[:, 1],
-                                 "cbcl_scr_syn_external_r": true_targets[:, 2],
-                                })
-    predicted_targets = pd.DataFrame({
-                                 "cbcl_scr_syn_thought_r_pred": predicted_targets[:, 0],
-                                 "cbcl_scr_syn_internal_r_pred": predicted_targets[:, 1],
-                                 "cbcl_scr_syn_external_r_pred": predicted_targets[:, 2],
-                                "indices": indices})
-    pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
-pred_results = pd.concat(pred_results)
-pred_results.to_csv(f"results/multivariate/abcd/pred_results.csv", index=False)
-
-prediction_mape_by_element = []
-for k, v in prediction_metrics.items():
-    true_targets, predicted_targets, indices = v
-    
-    mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
-    
-    for i, mape in enumerate(mape_by_element):
-        prediction_mape_by_element.append(
-            {
-                'train_ratio': k[0],
-                'experiment': k[1],
-                'dataset': k[2],
-                'mape': mape
-            }
-        )
-
-df = pd.DataFrame(prediction_mape_by_element)
-df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-df.columns = ['train_ratio',
-              'experiment',
-              'dataset',
-               'cbcl_scr_syn_thought_r',
-               'cbcl_scr_syn_internal_r',
-               'cbcl_scr_syn_external_r']
-df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
-df.to_csv(f"results/multivariate/abcd/mape.csv", index = False)
-
-embedding_data = []
-for experiment_embedding in embeddings:
-    for key, values in experiment_embedding.items():
-        for value in values:
-            embedding_data.append({
-                'dataset': key,
-                'index': value['index'],
-                'target_embedded': value['target_embedded'],
-                'feature_embedded': value['feature_embedded']
-            })
-
-embedding_df = pd.DataFrame(embedding_data)
-embedding_df.to_csv(f"results/multivariate/abcd/embeddings.csv", index=False)
-=======
 @hydra.main(config_path=".", config_name="main_model_config")
 
 def main(cfg: DictConfig):
@@ -1107,4 +830,3 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
->>>>>>> 81ae6870e953708552f37f31ae8d8538af419b48
