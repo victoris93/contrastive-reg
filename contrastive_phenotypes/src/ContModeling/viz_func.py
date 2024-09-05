@@ -17,10 +17,6 @@ import os
 import re
 from tqdm import tqdm
 
-ROOT = '/gpfs3/well/margulies/users/cpy397/contrastive-learning'
-RESULTS_DIR = f'{ROOT}/results'
-DATA_PATH = f"{ROOT}/ABCD/abcd_dataset_400parcels.nc"
-FIGURE_DIR = f'{RESULTS_DIR}/figures'
 
 def replace_with_network(label, network_labels):
     for network in network_labels:
@@ -58,7 +54,7 @@ def replace_with_network(label, network_labels):
     for network in network_labels:
         if network in label:
             return network
-    return labe
+    return label
 
 
 def mape_cog(csv, cog_score):
@@ -130,30 +126,8 @@ def compute_batch_elementwise_correlation(true, recon):
     return correlations
 
 
-def wandb_plot_corr(wandb, exp_name, true_mats, recon_mats):
-    
-    corr_mat_pred = compute_batch_elementwise_correlation(true_mats, recon_mats)
-    
-    mean_corr = corr_mat_pred.mean()
-    mean_mape = mape_mat.mean()
-
-
-    display = plotting.plot_matrix(corr_mat_pred,
-        title=f"Corr(True, Recon) | Exp {exp_name}",
-                         grid = False,
-                         vmax = 1.,
-                         vmin = -1.
-        )
-    plt.text(-12, 0.02, f'mean_corr = {mean_corr:.2f}', color='black', ha='right', va='bottom', fontsize=12, transform=plt.gca().transAxes,
-            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-    
-    temp_file = f"{FIGURE_DIR}/temp_corr_matrix_{exp_name}.png"
-    display.figure.savefig(temp_file)
-    wandb.log({'Correlation True vs. Recon | Test': wandb.Image(temp_file)})
-    os.remove(temp_file)
-
-def load_recon_mats(exp_name, vectorize):
-    exp_dir = f"{RESULTS_DIR}/{exp_name}"
+def load_recon_mats(work_dir, exp_name, vectorize):
+    exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
     recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "recon_mat" in file])
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
@@ -166,26 +140,26 @@ def load_recon_mats(exp_name, vectorize):
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(exp_name, vectorize):
-    test_idx_path = f"{RESULTS_DIR}/{exp_name}/test_idx.npy"
+def load_true_mats(data_path, work_dir, exp_name, vectorize):
+    test_idx_path = f"{work_dir}/results/{exp_name}/test_idx.npy"
     test_idx = np.load(test_idx_path)
-    dataset = xr.open_dataset(DATA_PATH)
+    dataset = xr.open_dataset(data_path)
     true_mat = dataset.isel(subject = test_idx).to_array().squeeze().values
     if vectorize:
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
 
-def load_mape(exp_name):
-    exp_dir = f"{RESULTS_DIR}/{exp_name}"
+def load_mape(work_dir, exp_name):
+    exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
     mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "mape_mat" in file])
     mape_paths = [os.path.join(recon_mat_dir, file) for file in mape_mat_files]
     mape_mat = np.concatenate([np.load(path) for path in mape_paths])
     return mape_mat
 
-def get_corr_data(exp_name, network_labels = NETWORK_LABELS):
-    recon_mat = load_recon_mats(exp_name, False)
-    true_mat = load_true_mats(exp_name, False)
+def get_corr_data(data_path, work_dir, exp_name, network_labels = NETWORK_LABELS):
+    recon_mat = load_recon_mats(work_dir, exp_name, False)
+    true_mat = load_true_mats(data_path, work_dir, exp_name, False)
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
 
     corr_data = {
@@ -200,19 +174,19 @@ def get_corr_data(exp_name, network_labels = NETWORK_LABELS):
     corr_data = pd.DataFrame(corr_data)
     return corr_data
 
-def compile_test_corrs(exp_name1, exp_name2):
-    corr_data_1 = get_corr_data(exp_name1)
-    corr_data_2 = get_corr_data(exp_name2)
+def compile_test_corrs(data_path, work_dir, exp_name1, exp_name2):
+    corr_data_1 = get_corr_data(data_path, work_dir, exp_name1)
+    corr_data_2 = get_corr_data(data_path, work_dir, exp_name2)
     corr_data = pd.concat([corr_data_1, corr_data_2])
     return corr_data
 
-def wandb_plot_test_recon_corr(wandb, exp_name):
+def wandb_plot_test_recon_corr(wandb, data_path, work_dir, exp_name):
 
-    fig_path = f"{FIGURE_DIR}/test_recon_corr_{exp_name}.png"
+    fig_path = f"{work_dir}/results/figures/test_recon_corr_{exp_name}.png"
 
-    recon_mat = load_recon_mats(exp_name, False)
-    true_mat = load_true_mats(exp_name, False)
-    mape_mat = load_mape(exp_name)
+    recon_mat = load_recon_mats(work_dir, exp_name, False)
+    true_mat = load_true_mats(data_path, work_dir, exp_name, False)
+    mape_mat = load_mape(work_dir, exp_name)
 
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
     
@@ -238,19 +212,19 @@ def wandb_plot_test_recon_corr(wandb, exp_name):
     wandb.log({f"Corr(True, Recon) | All Test | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_individual_recon(wandb, exp_name, sub_idx):
+def wandb_plot_individual_recon(wandb, data_path, work_dir, exp_name, sub_idx):
 
-    test_idx_path = f"{RESULTS_DIR}/{exp_name}/test_idx.npy"
+    test_idx_path = f"{work_dir}/results/{exp_name}/test_idx.npy"
     test_idx = np.load(test_idx_path)
     sub_idx_in_test = test_idx[sub_idx]
     
-    recon_mat = load_recon_mats(exp_name, False)
+    recon_mat = load_recon_mats(work_dir, exp_name, False)
     recon = recon_mat[sub_idx]
     
-    mape_mat = load_mape(exp_name)
+    mape_mat = load_mape(work_dir, exp_name)
     mape = np.abs(mape_mat[sub_idx])
     
-    dataset = xr.open_dataset(DATA_PATH)
+    dataset = xr.open_dataset(data_path)
     true = dataset.isel(subject = sub_idx_in_test).to_array().squeeze()
     residual = true - recon
 
@@ -258,42 +232,42 @@ def wandb_plot_individual_recon(wandb, exp_name, sub_idx):
 
     plotting.plot_matrix(true,
     axes = axes[0],
-    title=f"True Mat | Exp {exp_name} idx{sub_idx_in_test}",
+    title=f"True Mat | Exp {exp_name} idx {sub_idx_in_test}",
     vmax = 1.,
     vmin = -1.
     )
 
     plotting.plot_matrix(recon,
     axes = axes[1],
-    title=f"Recon Mat | Exp {exp_name} idx{sub_idx_in_test}",
+    title=f"Recon Mat | Exp {exp_name} idx {sub_idx_in_test}",
     vmax = 1.,
     vmin = -1.
     )
 
     plotting.plot_matrix(residual,
     axes = axes[2],
-    title=f"Risiduals | Exp {exp_name} idx{sub_idx_in_test}",
+    title=f"Risiduals | Exp {exp_name} idx {sub_idx_in_test}",
     vmax = 1.,
     vmin = -1.
     )
 
     plotting.plot_matrix(mape,
     axes = axes[3],
-    title=f"MAPE | Exp {exp_name} idx{sub_idx_in_test}",
+    title=f"MAPE | Exp {exp_name} idx {sub_idx_in_test}",
     vmax = 100, vmin=0
     )
     plt.tight_layout()
-    fig_path = f"{FIGURE_DIR}/individual_recon_sub_{exp_name}_{sub_idx_in_test}.png"
+    fig_path = f"{work_dir}/results/figures/individual_recon_sub_{exp_name}_idx_{sub_idx_in_test}.png"
     plt.savefig(fig_path)
     plt.close(fig)
     wandb.log({f"Individual Reconstructions | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_acc_vs_baseline(wandb, exp_name, baseline_exp_name):
+def wandb_plot_acc_vs_baseline(wandb, data_path, work_dir, exp_name, baseline_exp_name):
     
-    fig_path = f"{FIGURE_DIR}/corr_violinplot_{exp_name}_vs_{baseline_exp_name}.png"
+    fig_path = f"{work_dir}/results/figures/corr_violinplot_{exp_name}_vs_{baseline_exp_name}.png"
     
-    corr_data = compile_test_corrs(exp_name, baseline_exp_name)
+    corr_data = compile_test_corrs(data_path, work_dir, exp_name, baseline_exp_name)
     
     sns.set(style="whitegrid")
     fig = plt.figure(figsize=(15, 8))

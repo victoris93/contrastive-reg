@@ -22,7 +22,7 @@ import random
 from torch.utils.tensorboard import SummaryWriter
 import sys
 
-from .viz_func import wandb_plot_corr, wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
+from .viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .utils import mean_correlations_between_subjects, mape_between_subjects
 from .losses import LogEuclideanLoss, NormLoss
 from .models import AutoEncoder
@@ -31,7 +31,14 @@ from .helper_classes import MatData
 
 # -
 
-def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, wandb, device):
+def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
+    
+    wandb.init(project=cfg.project,
+        group = "ae_test",
+        mode = "offline",
+        name=cfg.experiment_name,
+       dir = cfg.output_dir)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
     input_dim_feat = cfg.input_dim_feat
@@ -82,10 +89,10 @@ def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_d
             test_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
             test_mape += mape_between_subjects(features, reconstructed_feat).item()
     
-    wandb_plot_test_recon_corr(wandb, cfg.experiment_name)
-    wandb_plot_individual_recon(wandb, cfg.experiment_name, 0)
-    wandb_plot_individual_recon(wandb, 'ae_loss_norm', 0)
-    wandb_plot_acc_vs_baseline(wandb, cfg.experiment_name, 'ae_loss_norm')
+    wandb_plot_test_recon_corr(wandb, cfg.dataset_path, cfg.work_dir, cfg.experiment_name)
+    wandb_plot_individual_recon(wandb, cfg.dataset_path, cfg.work_dir, cfg.experiment_name, 0)
+    wandb_plot_individual_recon(wandb, cfg.dataset_path, cfg.work_dir, 'ae_loss_norm', 0)
+    wandb_plot_acc_vs_baseline(wandb, cfg.dataset_path, cfg.work_dir, cfg.experiment_name, 'ae_loss_norm')
     
     wandb.finish()
 

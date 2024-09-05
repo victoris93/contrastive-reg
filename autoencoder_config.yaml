@@ -36,4 +36,5 @@ targets:
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
 tensorboard_dir: tensorboard
+work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/"
 output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"

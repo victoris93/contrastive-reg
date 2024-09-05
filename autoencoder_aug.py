@@ -28,18 +28,26 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
 import sys
-from model_testing import test_autoencoder
-from utils import get_best_fold, mape_between_subjects, mean_correlations_between_subjects
-from losses import LogEuclideanLoss, NormLoss
-from models import AutoEncoder
-from helper_classes import MatData
+from ContModeling.model_testing import test_autoencoder
+from ContModeling.utils import get_best_fold, mape_between_subjects, mean_correlations_between_subjects
+from ContModeling.losses import LogEuclideanLoss, NormLoss
+from ContModeling.models import AutoEncoder
+from ContModeling.helper_classes import MatData
 
 print("Fetching device...")
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, wandb, model=None, device = device):
+def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=None, device = device):
+
+
+    wandb.init(project=cfg.project,
+       group = f"train_fold_{fold}",
+       mode = "offline",
+       name=cfg.experiment_name,
+       dir = cfg.output_dir)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
     
     input_dim_feat = cfg.input_dim_feat
     output_dim_feat = cfg.output_dim_feat
@@ -97,7 +105,6 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, wandb,
                 loss = recon_loss + criterion(features,reconstructed_feat)
                 loss.backward()
                 optimizer_autoencoder.step()
-                writer.add_scalar('Loss/train', loss.item(), epoch)
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 
             model.eval()
@@ -134,7 +141,8 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, wandb,
                 break
 
             pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
-
+            
+    wandb.finish()
     model_weights = model.state_dict()
     print(loss_terms)
     
@@ -145,12 +153,14 @@ class FoldTrain(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, fold, train_idx, val_idx, train_dataset, model_params_dir, cfg, wandb, random_state=None, device=None, path: Path = None):
+    def __call__(self, fold, train_idx, val_idx, train_dataset, model_params_dir, cfg, random_state=None, device=None, path: Path = None):
+
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
+        
         self.fold = fold + 1
     
         input_dim_feat=cfg.input_dim_feat
@@ -166,7 +176,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
         [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
         B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
     
-        loss_terms, trained_weights, val_loss = train_autoencoder(self.fold, fold_train_dataset, fold_val_dataset, B_init_fMRI, cfg = cfg, wandb = wandb)
+        loss_terms, trained_weights, val_loss = train_autoencoder(self.fold, fold_train_dataset, fold_val_dataset, B_init_fMRI, cfg = cfg)
         torch.save(trained_weights, f"{model_params_dir}/autoencoder_weights_fold{self.fold}.pth")
         
         self.results = {"fold": self.fold,
@@ -187,9 +197,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    
-    wandb.init(project=cfg.project, mode = "offline", name=cfg.experiment_name, dir = "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results")
-    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+
     
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
@@ -230,7 +238,7 @@ def main(cfg: DictConfig):
         with executor.batch():
             for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
                 run_train_fold = FoldTrain()
-                job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset, model_params_dir = model_params_dir, cfg =cfg, wandb = wandb, random_state = random_state)
+                job = executor.submit(run_train_fold, fold, train_idx, val_idx, train_val_dataset, model_params_dir = model_params_dir, cfg =cfg, random_state = random_state)
                 fold_jobs.append(job)
 
         async def get_result(fold_jobs):
@@ -244,17 +252,25 @@ def main(cfg: DictConfig):
         fold_results = []
         for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
             run_train_fold = FoldTrain()
-            job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state, model_params_dir = model_params_dir, wandb = wandb, cfg = cfg)
+            job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state, model_params_dir = model_params_dir, cfg = cfg)
             fold_results.append(job)
-    # TEST
-
-    best_fold = get_best_fold(fold_results)
+    TEST
+    executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
+    executor.update_parameters(
+        timeout_min=120,
+#       slurm_account="ftj@a100",
+        slurm_partition="gpu_short",
+        gpus_per_node=1,
+        tasks_per_node=1,
+        nodes=1,
+        cpus_per_task=30
+        # slurm_constraint="a100",
+    )
+    best_fold = 5 # get_best_fold(fold_results)
     job = executor.submit(test_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
-                            recon_mat_dir = recon_mat_dir, wandb = wandb, device = device)
+                            recon_mat_dir = recon_mat_dir, device = device)
     output = job.result()
     print(output)
-
-
 # -
 
 if __name__ == "__main__":
