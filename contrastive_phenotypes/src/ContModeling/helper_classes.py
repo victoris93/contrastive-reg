@@ -5,7 +5,6 @@ from cmath import isinf
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Subset
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 import sys
 import pandas as pd
