@@ -41,7 +41,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=None, device = device):
 
-
     wandb.init(project=cfg.project,
        group = f"train_fold_{fold}",
        mode = "offline",
@@ -63,7 +62,6 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
         model = AutoEncoder(
             input_dim_feat,
             output_dim_feat,
-            B_init_fMRI,
             dropout_rate,
             cfg
         ).to(device)
@@ -143,7 +141,6 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
             pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
             
     wandb.finish()
-    model_weights = model.state_dict()
     print(loss_terms)
     
     return loss_terms, model.state_dict(), val_loss.item()
@@ -254,7 +251,7 @@ def main(cfg: DictConfig):
             run_train_fold = FoldTrain()
             job = run_train_fold(fold, train_idx, val_idx, train_val_dataset, random_state = random_state, model_params_dir = model_params_dir, cfg = cfg)
             fold_results.append(job)
-    TEST
+    # TEST
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
     executor.update_parameters(
         timeout_min=120,
@@ -266,7 +263,7 @@ def main(cfg: DictConfig):
         cpus_per_task=30
         # slurm_constraint="a100",
     )
-    best_fold = 5 # get_best_fold(fold_results)
+    best_fold = get_best_fold(fold_results)
     job = executor.submit(test_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
                             recon_mat_dir = recon_mat_dir, device = device)
     output = job.result()
