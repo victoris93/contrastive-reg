@@ -1,4 +1,4 @@
-
+project: "Conn-Phenotype Representations"
 experiment_name: "main_model_loss_norm"
 hypothesis: "Contrastive learning with norm loss"
 
@@ -19,6 +19,10 @@ weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio: 0.2
+
+# Mat AE enhancements
+ReEig: False
+skip_enc1: True
 
 # Contrastive loss parameters
 SupCon_kernel: multivariate_cauchy

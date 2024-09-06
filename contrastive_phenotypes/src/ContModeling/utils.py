@@ -87,6 +87,12 @@ def mean_absolute_percentage_error(y_true, y_pred):
     eps = 1e-6
     return torch.mean(torch.abs((y_true - y_pred)) / torch.abs(y_true)+eps) * 100
 
+def standardize(data, mean=None, std=None, epsilon = 1e-4): # any variable
+    if mean is None:
+        mean = np.mean(data, axis=0)
+    if std is None:
+        std = np.std(data, axis=0)+ epsilon
+    return (data - mean)/std, mean, std
 
 
 def standardize_dataset(dataset):
@@ -107,6 +113,20 @@ def standardize_dataset(dataset):
     standardized_dataset = TensorDataset(standardized_features, standardized_targets)
     
     return standardized_dataset
+
+def gaussian_kernel(x, krnl_sigma):
+    x = x - x.T
+    return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (
+        math.sqrt(2 * torch.pi) * krnl_sigma
+    )
+
+def cauchy(x, krnl_sigma):
+    x = x - x.T
+    return 1.0 / (krnl_sigma * (x**2) + 1)
+
+def multivariate_cauchy(x, krnl_sigma):
+    x = torch.cdist(x, x)
+    return 1.0 / (krnl_sigma * (x**2) + 1)
 
 def pca_labels(dataset, n_components):
     features = torch.vstack([dataset[i][0] for i in range(len(dataset))])
