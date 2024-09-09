@@ -15,39 +15,6 @@ from collections import defaultdict
 import xarray as xr
 
 
-def gaussian_kernel(x):
-    x = x - x.T
-    return torch.exp(-(x**2) / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
-
-
-def gaussian_kernel(x, krnl_sigma = 0.5):
-    x1 = x[:, :1] - x[:, :1].T
-    x2 = x[:, 1:2] - x[:, 1:2].T
-    x = x1**2 + x2**2
-    return torch.exp(-x / (2*(krnl_sigma**2))) / (math.sqrt(krnl_sigma*torch.pi)*1)
-
-def rbf(x):
-        x = x - x.T
-        return torch.exp(-(x**2)/(2*(krnl_sigma**2)))
-
-
-def rbf(X, krnl_sigma=0.5):
-    x1 = x[:, :1] - x[:, :1].T
-    x2 = x[:, 1:2] - x[:, 1:2].T
-    x = x1**2 + x2**2
-    return torch.exp(-x/(2*(krnl_sigma**2)))
-
-def cauchy(x):
-        x = x - x.T
-        return  1. / (krnl_sigma*(x**2) + 1)
-
-
-def cauchy(X, krnl_sigma=0.5):
-    x1 = x[:, :1] - x[:, :1].T
-    x2 = x[:, 1:2] - x[:, 1:2].T
-    x = x1**2 + x2**2
-    return 1. / (krnl_sigma*x + 1)
-
 class MatData(Dataset):
     def __init__(self, dataset_path, target_names, threshold=0):
         if not isinstance(target_names, list):

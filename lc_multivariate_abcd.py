@@ -31,6 +31,7 @@ from ContModeling.utils import gaussian_kernel, cauchy, multivariate_cauchy, sta
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
+from ContModeling.viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 
 torch.cuda.empty_cache()
 
@@ -47,208 +48,8 @@ SUPCON_KERNELS = {
     'multivariate_cauchy': multivariate_cauchy,
     'cauchy': cauchy,
     'gaussian_kernel': gaussian_kernel
-
 }
 
-def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
-
-    # MODEL DIMS
-    input_dim_feat = cfg.input_dim_feat
-    input_dim_target = cfg.input_dim_target
-    hidden_dim_feat = cfg.hidden_dim_feat
-    output_dim_target = cfg.output_dim_target
-    output_dim_feat = cfg.output_dim_feat
-    kernel = SUPCON_KERNELS[cfg.SupCon_kernel]
-    
-    # TRAINING PARAMS
-    lr = cfg.lr
-    batch_size = cfg.batch_size
-    dropout_rate = cfg.dropout_rate
-    weight_decay = cfg.weight_decay
-    num_epochs = cfg.num_epochs
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-
-    mean= torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
-    if model is None:
-        model = PhenoProj(
-            input_dim_feat,
-            input_dim_target,
-            hidden_dim_feat,
-            output_dim_target,
-            output_dim_feat,
-            dropout_rate,
-            cfg
-        ).to(device)
-
-    model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-
-    criterion_pft = KernelizedSupCon(
-        method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
-    )
-    criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=cfg.ptt_temperature, base_temperature=cfg.ptt_base_temperature, kernel=kernel, krnl_sigma=cfg.ptt_sigma
-    )
-    
-    feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
-    joint_embedding_crit = EMB_LOSSES[cfg.joint_embedding_crit]
-    target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
-    target_decoding_from_reduced_emb_crit = EMB_LOSSES[cfg.target_decoding_from_reduced_emb_crit]
-
-
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
-
-    loss_terms = []
-    validation = []
-    autoencoder_features = []
-    
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    tensorboard_dir = os.path.join(cfg.output_dir,cfg.experiment_name, cfg.tensorboard_dir)
-    os.makedirs(tensorboard_dir, exist_ok=True)
-
-
-    with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
-        for epoch in pbar:
-            model.train()
-
-            wandb.init(project=cfg.project,
-                group = f"train_PhenProj_exp{experiment}_epoch{epoch}",
-                mode = "offline",
-                name=cfg.experiment_name,
-                dir = cfg.output_dir)
-            wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
-            wandb.log({
-                'train_ratio': train_ratio,
-                'experiment': experiment,
-            })
-
-            loss_terms_batch = defaultdict(lambda:0)
-            for features, targets in train_loader:
-                
-                optimizer.zero_grad()
-                features = features.to(device)
-                targets = targets.to(device)
-
-                ## FEATURE ENCODING
-                embedded_feat = model.encode_features(features)
-                ## FEATURE DECODING
-                reconstructed_feat = model.decode_features(embedded_feat)
-                ## FEATURE DECODING LOSS
-                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat)
-
-                ## REDUCED FEAT TO TARGET EMBEDDING
-                embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
-                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
-                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)                
-                out_target = model.encode_targets(targets)
-
-                if cfg.joint_embedding_crit == 'cosine':
-                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
-                                                                      out_target,
-                                                                      torch.ones(out_target.shape[0]).to(device)
-                                                                      )
-                else:
-                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
-                                                                      out_target
-                                                                      )
-                
-                kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
-
-                ## TARGET DECODING FROM TARGET EMBEDDING
-                out_target_decoded = model.decode_targets(out_target)               
-
-                ## KERNLIZED LOSS: target embedding vs targets
-                kernel_embedded_target_loss = criterion_ptt(out_target.unsqueeze(1), targets)
-                
-                ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_loss = 10*target_decoding_crit(targets, out_target_decoded)
-
-                ## TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
-                target_decoded_from_reduced_emb = model.decode_targets(reduced_feat_embedding)
-
-                ## LOSS: TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
-                target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
-
-                ## SUM ALL LOSSES
-                loss = feature_autoencoder_loss + kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
-
-                loss.backward()
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-
-                
-                loss_terms_batch['loss'] += loss.item() / len(train_loader)
-                loss_terms_batch['feature_autoencoder_loss'] += feature_autoencoder_loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_feature_loss'] += kernel_embedded_feature_loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_target_loss'] += kernel_embedded_target_loss.item() / len(train_loader)
-                loss_terms_batch['joint_embedding_loss'] += joint_embedding_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_loss'] += target_decoding_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_from_reduced_emb_loss'] += target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-                
-
-                wandb.log({
-                    'epoch': epoch,
-                    'total_loss': loss_terms_batch['loss'],
-                    'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
-                    'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
-                    'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
-                    'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
-                    'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
-                    'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
-                })
-
-            loss_terms_batch['epoch'] = epoch
-            loss_terms.append(loss_terms_batch)
-
-            model.eval()
-            mape_batch = 0
-            corr_batch = 0
-            with torch.no_grad():
-                for (features, targets) in test_loader:
-                    
-                    features, targets = features.to(device), targets.to(device)                    
-                    out_feat = model.encode_features(features)
-                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
-                    transfer_out_feat = model.transfer_embedding(out_feat)
-                    out_target_decoded = model.decode_targets(transfer_out_feat)
-                    print("OUT TARGET DECODED", out_target_decoded[:3], "TARGETS", targets[:3])
-                    
-                    epsilon = 1e-8
-                    mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
-                    corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
-                    mape_batch+=mape.item()
-                    corr_batch += corr
-
-                mape_batch = mape_batch/len(test_loader)
-                corr_batch = corr_batch/len(test_loader)
-                validation.append(mape_batch)
-
-            wandb.log({
-                'MAPE/val' : mape_batch,
-                'Corr/val': corr_batch,
-                })
-            wandb.finish()
-            
-            scheduler.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -4:
-                break
-
-            pbar.set_postfix_str(
-                f"Epoch {epoch} "
-                f"| Loss {loss_terms[-1]['loss']:.02f} "
-                f"| val Target MAPE {mape_batch:.02f}"
-                f"| val Target Corr {corr_batch:.02f} "
-                f"| log10 lr {np.log10(scheduler._last_lr[0])}"
-            )
-    loss_terms = pd.DataFrame(loss_terms)
-    print(loss_terms[['loss','feature_autoencoder_loss', 'kernel_embedded_feature_loss', 'kernel_embedded_target_loss']])
-    return loss_terms, model
 
 class Experiment(submitit.helpers.Checkpointable):
     def __init__(self):
@@ -374,6 +175,201 @@ class Experiment(submitit.helpers.Checkpointable):
     def save(self, path: Path):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
+
+def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
+
+    # MODEL DIMS
+    input_dim_feat = cfg.input_dim_feat
+    input_dim_target = cfg.input_dim_target
+    hidden_dim_feat = cfg.hidden_dim_feat
+    output_dim_target = cfg.output_dim_target
+    output_dim_feat = cfg.output_dim_feat
+    kernel = SUPCON_KERNELS[cfg.SupCon_kernel]
+    
+    # TRAINING PARAMS
+    lr = cfg.lr
+    batch_size = cfg.batch_size
+    dropout_rate = cfg.dropout_rate
+    weight_decay = cfg.weight_decay
+    num_epochs = cfg.num_epochs
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+
+    mean= torch.tensor(mean).to(device)
+    std = torch.tensor(std).to(device)
+    if model is None:
+        model = PhenoProj(
+            input_dim_feat,
+            input_dim_target,
+            hidden_dim_feat,
+            output_dim_target,
+            output_dim_feat,
+            dropout_rate,
+            cfg
+        ).to(device)
+
+    model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+
+    criterion_pft = KernelizedSupCon(
+        method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
+    )
+    criterion_ptt = KernelizedSupCon(
+        method="expw", temperature=cfg.ptt_temperature, base_temperature=cfg.ptt_base_temperature, kernel=kernel, krnl_sigma=cfg.ptt_sigma
+    )
+    
+    feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
+    joint_embedding_crit = EMB_LOSSES[cfg.joint_embedding_crit]
+    target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
+    target_decoding_from_reduced_emb_crit = EMB_LOSSES[cfg.target_decoding_from_reduced_emb_crit]
+
+
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
+
+    loss_terms = []
+    validation = []
+    autoencoder_features = []
+    
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    tensorboard_dir = os.path.join(cfg.output_dir,cfg.experiment_name, cfg.tensorboard_dir)
+    os.makedirs(tensorboard_dir, exist_ok=True)
+    
+    wandb.init(project=cfg.project,
+        mode = "offline",
+        name=f"{cfg.experiment_name}_exp{experiment}_train_ratio_{train_ratio}",
+        dir = cfg.output_dir)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+
+    with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
+        
+        for epoch in pbar:
+            model.train()
+
+            loss_terms_batch = defaultdict(lambda:0)
+            for features, targets in train_loader:
+                
+                optimizer.zero_grad()
+                features = features.to(device)
+                targets = targets.to(device)
+
+                ## FEATURE ENCODING
+                embedded_feat = model.encode_features(features)
+                ## FEATURE DECODING
+                reconstructed_feat = model.decode_features(embedded_feat)
+                ## FEATURE DECODING LOSS
+                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat)
+
+                ## REDUCED FEAT TO TARGET EMBEDDING
+                embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
+                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
+                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)                
+                out_target = model.encode_targets(targets)
+
+                if cfg.joint_embedding_crit == 'cosine':
+                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
+                                                                      out_target,
+                                                                      torch.ones(out_target.shape[0]).to(device)
+                                                                      )
+                else:
+                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
+                                                                      out_target
+                                                                      )
+                
+                kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
+
+                ## TARGET DECODING FROM TARGET EMBEDDING
+                out_target_decoded = model.decode_targets(out_target)               
+
+                ## KERNLIZED LOSS: target embedding vs targets
+                kernel_embedded_target_loss = criterion_ptt(out_target.unsqueeze(1), targets)
+                
+                ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
+                target_decoding_loss = 10*target_decoding_crit(targets, out_target_decoded)
+
+                ## TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
+                target_decoded_from_reduced_emb = model.decode_targets(reduced_feat_embedding)
+
+                ## LOSS: TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
+                target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
+
+                ## SUM ALL LOSSES
+                loss = feature_autoencoder_loss + kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
+
+                loss.backward()
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+
+                
+                loss_terms_batch['loss'] = loss.item() / len(train_loader)
+                loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
+                loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
+                loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(train_loader)
+                loss_terms_batch['joint_embedding_loss'] = joint_embedding_loss.item() / len(train_loader)
+                loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
+                loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
+                
+
+                wandb.log({
+                    'epoch': epoch,
+                    'total_loss': loss_terms_batch['loss'],
+                    'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
+                    'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
+                    'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
+                    'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
+                    'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
+                    'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
+                })
+
+            loss_terms_batch['epoch'] = epoch
+            loss_terms.append(loss_terms_batch)
+
+            model.eval()
+            mape_batch = 0
+            corr_batch = 0
+            with torch.no_grad():
+                for (features, targets) in test_loader:
+                    
+                    features, targets = features.to(device), targets.to(device)                    
+                    out_feat = model.encode_features(features)
+                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
+                    transfer_out_feat = model.transfer_embedding(out_feat)
+                    out_target_decoded = model.decode_targets(transfer_out_feat)
+                    print("OUT TARGET DECODED", out_target_decoded[:3], "TARGETS", targets[:3])
+                    
+                    epsilon = 1e-8
+                    mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
+                    corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
+                    mape_batch+=mape.item()
+                    corr_batch += corr
+
+                mape_batch = mape_batch/len(test_loader)
+                corr_batch = corr_batch/len(test_loader)
+                validation.append(mape_batch)
+
+            wandb.log({
+                'Target MAPE/val' : mape_batch,
+                'Target Corr/val': corr_batch,
+                })
+            
+            scheduler.step(mape_batch)
+            if np.log10(scheduler._last_lr[0]) < -4:
+                break
+
+            pbar.set_postfix_str(
+                f"Epoch {epoch} "
+                f"| Loss {loss_terms[-1]['loss']:.02f} "
+                f"| val Target MAPE {mape_batch:.02f}"
+                f"| val Target Corr {corr_batch:.02f} "
+                f"| log10 lr {np.log10(scheduler._last_lr[0])}"
+            )
+    wandb.finish()
+    loss_terms = pd.DataFrame(loss_terms)
+    print(loss_terms[['loss','feature_autoencoder_loss', 'kernel_embedded_feature_loss', 'kernel_embedded_target_loss']])
+    return loss_terms, model
 
 @hydra.main(config_path=".", config_name="main_model_config")
 
@@ -506,3 +502,5 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
+
+
