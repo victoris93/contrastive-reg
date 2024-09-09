@@ -1,4 +1,4 @@
-project: "Conn-Phenotype Representations"
+project: "PhenProj"
 experiment_name: "main_model_loss_norm"
 hypothesis: "Contrastive learning with norm loss"
 
@@ -9,20 +9,20 @@ hidden_dim_feat: 1000
 input_dim_target: 3
 output_dim_target: 2
 
+# MatAutoencoder enhancements
+skip_enc1: True
+ReEig: False
+
 # Training parameters
 multi_gpu: True
 num_epochs: 100
 batch_size: 32
-experiments: 20
+experiments: 1
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio: 0.2
-
-# Mat AE enhancements
-ReEig: False
-skip_enc1: True
 
 # Contrastive loss parameters
 SupCon_kernel: multivariate_cauchy

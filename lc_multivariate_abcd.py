@@ -16,7 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from scipy.stats import pearsonr
+from scipy.stats import spearmanr
 from sklearn.model_selection import (
     train_test_split,
 )
@@ -190,6 +190,7 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 loss_terms_batch['joint_embedding_loss'] += joint_embedding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_loss'] += target_decoding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] += target_decoding_from_reduced_emb_loss.item() / len(train_loader)
+                
 
                 wandb.log({
                     'epoch': epoch,
@@ -216,10 +217,11 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                     out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
                     transfer_out_feat = model.transfer_embedding(out_feat)
                     out_target_decoded = model.decode_targets(transfer_out_feat)
+                    print("OUT TARGET DECODED", out_target_decoded[:3], "TARGETS", targets[:3])
                     
                     epsilon = 1e-8
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
-                    corr =  pearsonr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
+                    corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
                     mape_batch+=mape.item()
                     corr_batch += corr
 
@@ -240,12 +242,12 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
             pbar.set_postfix_str(
                 f"Epoch {epoch} "
                 f"| Loss {loss_terms[-1]['loss']:.02f} "
-                f"| val MAPE {mape_batch:.02f}"
-                f"| val Corr {corr_batch:.02f} "
+                f"| val Target MAPE {mape_batch:.02f}"
+                f"| val Target Corr {corr_batch:.02f} "
                 f"| log10 lr {np.log10(scheduler._last_lr[0])}"
             )
     loss_terms = pd.DataFrame(loss_terms)
-    print(loss_terms[['loss','kernel_embedded_feature_loss', 'kernel_embedded_target_loss']])
+    print(loss_terms[['loss','feature_autoencoder_loss', 'kernel_embedded_feature_loss', 'kernel_embedded_target_loss']])
     return loss_terms, model
 
 class Experiment(submitit.helpers.Checkpointable):
