@@ -31,7 +31,7 @@ import sys
 from ContModeling.model_testing import test_autoencoder
 from ContModeling.utils import get_best_fold, mape_between_subjects, mean_correlations_between_subjects
 from ContModeling.losses import LogEuclideanLoss, NormLoss
-from ContModeling.models import AutoEncoder
+from ContModeling.models import MatAutoEncoder
 from ContModeling.helper_classes import MatData
 
 print("Fetching device...")
@@ -59,7 +59,7 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     if model is None:
-        model = AutoEncoder(
+        model = MatAutoEncoder(
             input_dim_feat,
             output_dim_feat,
             dropout_rate,
@@ -190,7 +190,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 # +
-@hydra.main(config_path=".", config_name="autoencoder_config")
+@hydra.main(config_path=".", config_name="mat_autoencoder_config")
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
