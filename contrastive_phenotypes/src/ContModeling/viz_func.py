@@ -96,20 +96,6 @@ def combine_images(image_paths, save_to):
     combined_image.save(save_to)
 
 
-def mat_correlations(true, recon):
-    batch_size, rows, cols = true.shape
-    correlations = np.zeros((batch_size, rows, cols))
-    flat_true = true.reshape(batch_size, rows * cols)
-    flat_recon = recon.reshape(batch_size, rows * cols)
-    
-    with tqdm(total=rows * cols, desc='Computing correlations') as pbar:
-        for i in range(rows * cols):
-            for b in range(batch_size):
-                correlations[b, i // cols, i % cols] = pearsonr(flat_true[:, i], flat_recon[:, i])[0]
-
-    return correlations
-
-
 def compute_batch_elementwise_correlation(true, recon):
     batch_size, rows, cols = true.shape
     correlations = np.zeros((rows, cols))
@@ -126,10 +112,14 @@ def compute_batch_elementwise_correlation(true, recon):
     return correlations
 
 
-def load_recon_mats(work_dir, exp_name, vectorize):
+def load_recon_mats(work_dir, exp_name, vectorize, is_full_model = False, exp_num = None):
+    recon_path_suffix = ""
+    if is_full_model:
+        recon_path_suffix = f"_exp{exp_num}"
+
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "recon_mat" in file])
+    recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"recon_mat{recon_path_suffix}" in file])
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
     
@@ -140,8 +130,12 @@ def load_recon_mats(work_dir, exp_name, vectorize):
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(data_path, work_dir, exp_name, vectorize):
-    test_idx_path = f"{work_dir}/results/{exp_name}/test_idx.npy"
+def load_true_mats(data_path, work_dir, exp_name, vectorize, is_full_model = False, exp_num = None):
+    recon_path_suffix = ""
+    if is_full_model:
+        recon_path_suffix = f"_exp{exp_num}"
+
+    test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)
     dataset = xr.open_dataset(data_path)
     true_mat = dataset.isel(subject = test_idx).to_array().squeeze().values
@@ -149,17 +143,19 @@ def load_true_mats(data_path, work_dir, exp_name, vectorize):
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
 
-def load_mape(work_dir, exp_name):
+def load_mape(work_dir, exp_name, is_full_model = False, exp_num = None):
+    recon_path_suffix = ""
+    if is_full_model:
+        recon_path_suffix = f"_exp{exp_num}"
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "mape_mat" in file])
+    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"mape_mat{recon_path_suffix}" in file])
     mape_paths = [os.path.join(recon_mat_dir, file) for file in mape_mat_files]
     mape_mat = np.concatenate([np.load(path) for path in mape_paths])
     return mape_mat
 
-def get_corr_data(data_path, work_dir, exp_name, network_labels = NETWORK_LABELS):
-    recon_mat = load_recon_mats(work_dir, exp_name, False)
-    true_mat = load_true_mats(data_path, work_dir, exp_name, False)
+def get_corr_data(recon_mat, true_mat, network_labels = NETWORK_LABELS):
+
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
 
     corr_data = {
@@ -174,19 +170,16 @@ def get_corr_data(data_path, work_dir, exp_name, network_labels = NETWORK_LABELS
     corr_data = pd.DataFrame(corr_data)
     return corr_data
 
-def compile_test_corrs(data_path, work_dir, exp_name1, exp_name2):
-    corr_data_1 = get_corr_data(data_path, work_dir, exp_name1)
-    corr_data_2 = get_corr_data(data_path, work_dir, exp_name2)
+def compile_test_corrs(mats_exp1, mats_exp2): # give tuples (true, recon)
+    corr_data_1 = get_corr_data(mats_exp1[0], mats_exp1[1])
+    corr_data_2 = get_corr_data(mats_exp2[0], mats_exp2[1])
     corr_data = pd.concat([corr_data_1, corr_data_2])
     return corr_data
 
-def wandb_plot_test_recon_corr(wandb, data_path, work_dir, exp_name):
-
-    fig_path = f"{work_dir}/results/figures/test_recon_corr_{exp_name}.png"
-
-    recon_mat = load_recon_mats(work_dir, exp_name, False)
-    true_mat = load_true_mats(data_path, work_dir, exp_name, False)
-    mape_mat = load_mape(work_dir, exp_name)
+def wandb_plot_test_recon_corr(wandb, recon_mat, true_mat, mape_mat, exp_name, is_full_model = False, exp_num = None):
+    if is_full_model:
+        suffix = f"_{exp_num}"
+    fig_path = f"{work_dir}/results/figures/test_recon_corr_{exp_name}{suffix}.png"
 
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
     
@@ -212,20 +205,12 @@ def wandb_plot_test_recon_corr(wandb, data_path, work_dir, exp_name):
     wandb.log({f"Corr(True, Recon) | All Test | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_individual_recon(wandb, data_path, work_dir, exp_name, sub_idx):
+def wandb_plot_individual_recon(wandb, test_idx, recon_mat, true_mat, mape_mat, sub_idx):
 
-    test_idx_path = f"{work_dir}/results/{exp_name}/test_idx.npy"
-    test_idx = np.load(test_idx_path)
     sub_idx_in_test = test_idx[sub_idx]
-    
-    recon_mat = load_recon_mats(work_dir, exp_name, False)
     recon = recon_mat[sub_idx]
-    
-    mape_mat = load_mape(work_dir, exp_name)
     mape = np.abs(mape_mat[sub_idx])
-    
-    dataset = xr.open_dataset(data_path)
-    true = dataset.isel(subject = sub_idx_in_test).to_array().squeeze()
+    true = true_mat[sub_idx]
     residual = true - recon
 
     fig, axes = plt.subplots(1, 4, figsize=(36, 7))

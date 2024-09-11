@@ -127,6 +127,13 @@ class Experiment(submitit.helpers.Checkpointable):
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
+
+            wandb.init(project=cfg.project,
+                mode = "offline",
+                name=f"TEST_{cfg.experiment_name}_exp{experiment}_train_ratio_{train_ratio}",
+                dir = cfg.output_dir)
+            wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+
             model.eval()
             with torch.no_grad():
                 train_dataset = Subset(dataset, train_indices)
@@ -141,8 +148,13 @@ class Experiment(submitit.helpers.Checkpointable):
                     X_embedded, y_embedded = model.forward(X, y)
                                         
                     if label == 'test' and train_ratio == 1.0:
+                        np.save(f'{recon_mat_dir}/test_idx_exp{experiment}',d_indices)
                         recon_mat = model.decode_features(X_embedded)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
+                        
+                        wandb_plot_test_recon_corr(wandb, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), cfg.experiment_name, True)
+                        wandb_plot_individual_recon(wandb, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0)
+
                         np.save(f'{recon_mat_dir}/recon_mat_exp{experiment}', recon_mat.cpu().numpy())
                         np.save(f'{recon_mat_dir}/mape_mat_exp{experiment}', mape_mat.cpu().numpy())
                         
@@ -150,9 +162,16 @@ class Experiment(submitit.helpers.Checkpointable):
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
                     X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
                     y_pred = model.decode_targets(X_emb_reduced)
-                    print(y_pred[:3])
-                    
-                    
+                    if label == 'test':
+                        mape =  100 * torch.mean(torch.abs((y - y_pred)) / torch.abs((y + epsilon))).item()
+                        corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
+
+                        wandb.log({
+                            'Test | Target MAPE/val' : mape_batch,
+                            'Test | Target Corr/val': corr_batch,
+                            'Test | Train ratio' : train_ratio
+                            })
+            
                     predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
@@ -177,6 +196,7 @@ class Experiment(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
+    print("Start training...")
 
     # MODEL DIMS
     input_dim_feat = cfg.input_dim_feat
@@ -245,7 +265,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
     wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
 
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
-        
         for epoch in pbar:
             model.train()
 
@@ -261,7 +280,7 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 ## FEATURE DECODING
                 reconstructed_feat = model.decode_features(embedded_feat)
                 ## FEATURE DECODING LOSS
-                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat)
+                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
 
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
@@ -279,7 +298,7 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                                                                       out_target
                                                                       )
                 
-                kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
+                kernel_embedded_feature_loss = 10 * criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
 
                 ## TARGET DECODING FROM TARGET EMBEDDING
                 out_target_decoded = model.decode_targets(out_target)               
@@ -288,7 +307,7 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 kernel_embedded_target_loss = criterion_ptt(out_target.unsqueeze(1), targets)
                 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_loss = 10*target_decoding_crit(targets, out_target_decoded)
+                target_decoding_loss = 100*target_decoding_crit(targets, out_target_decoded)
 
                 ## TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
                 target_decoded_from_reduced_emb = model.decode_targets(reduced_feat_embedding)
@@ -338,7 +357,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                     out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
                     transfer_out_feat = model.transfer_embedding(out_feat)
                     out_target_decoded = model.decode_targets(transfer_out_feat)
-                    print("OUT TARGET DECODED", out_target_decoded[:3], "TARGETS", targets[:3])
                     
                     epsilon = 1e-8
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
@@ -368,7 +386,6 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
             )
     wandb.finish()
     loss_terms = pd.DataFrame(loss_terms)
-    print(loss_terms[['loss','feature_autoencoder_loss', 'kernel_embedded_feature_loss', 'kernel_embedded_target_loss']])
     return loss_terms, model
 
 @hydra.main(config_path=".", config_name="main_model_config")
@@ -380,7 +397,7 @@ def main(cfg: DictConfig):
     tensorboard_dir = os.path.join(results_dir, cfg.tensorboard_dir)
     os.makedirs(tensorboard_dir, exist_ok=True)
 
-    random_state = np.random.RandomState(seed=42)
+    random_state = np.random.RandomState(seed=123)
 
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
@@ -398,8 +415,8 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu_short",
-            gpus_per_node=1,
+            slurm_partition="prepost",
+            # gpus_per_node=1,
             tasks_per_node=1,
             nodes=1,
             cpus_per_task=30
