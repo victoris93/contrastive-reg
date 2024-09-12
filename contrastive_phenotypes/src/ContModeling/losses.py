@@ -4,19 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-def gaussian_kernel(x, sigma):
-    x = x - x.T
-    return torch.exp(-(x**2) / (2*(sigma**2))) / (math.sqrt(sigma*torch.pi)*sigma)
-
-def rbf(x):
-        x = x - x.T
-        return torch.exp(-(x**2)/(2*(1**2)))
-
-def cauchy(x):
-        x = x - x.T
-        return  1. / (1*(x**2) + 1)
-
-
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR

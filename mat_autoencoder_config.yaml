@@ -1,15 +1,18 @@
-project: "Matrix Autoencoder"
-experiment_name: "mat_ae_skip_loss_norm"
-hypothesis: "corr with skip conn > corr without skip conn"
+project: "PretrainMatAE_SCZ"
+experiment_name: "mat_ae_test_size0.2"
+
+hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 100
+num_epochs: 10
 batch_size: 32
-kfolds: 5
+kfolds: 2
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
+test_size : 0.2
+seed : 42
 
 # non-linearity enhancements
 ReEig: False
@@ -26,15 +29,12 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 best_fold: 5
 
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"  
+dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/scz_dataset_400parcels.nc"  
 targets:
-    - cbcl_scr_syn_thought_r
-    - cbcl_scr_syn_internal_r
-    - cbcl_scr_syn_external_r
+    - age
 
 # Directory for saving results
 work_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
-tensorboard_dir: tensorboard
 output_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/results"

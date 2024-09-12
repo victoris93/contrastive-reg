@@ -112,10 +112,10 @@ def compute_batch_elementwise_correlation(true, recon):
     return correlations
 
 
-def load_recon_mats(work_dir, exp_name, vectorize, is_full_model = False, exp_num = None):
+def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
     recon_path_suffix = ""
     if is_full_model:
-        recon_path_suffix = f"_exp{exp_num}"
+        recon_path_suffix = f"_run{run_num}"
 
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
@@ -130,10 +130,10 @@ def load_recon_mats(work_dir, exp_name, vectorize, is_full_model = False, exp_nu
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(data_path, work_dir, exp_name, vectorize, is_full_model = False, exp_num = None):
+def load_true_mats(data_path, exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
     recon_path_suffix = ""
     if is_full_model:
-        recon_path_suffix = f"_exp{exp_num}"
+        recon_path_suffix = f"_run{run_num}"
 
     test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)
@@ -143,10 +143,10 @@ def load_true_mats(data_path, work_dir, exp_name, vectorize, is_full_model = Fal
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
 
-def load_mape(work_dir, exp_name, is_full_model = False, exp_num = None):
+def load_mape(exp_name, work_dir, is_full_model = False, run_num = None):
     recon_path_suffix = ""
     if is_full_model:
-        recon_path_suffix = f"_exp{exp_num}"
+        recon_path_suffix = f"_run{run_num}"
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
     mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"mape_mat{recon_path_suffix}" in file])
@@ -176,9 +176,11 @@ def compile_test_corrs(mats_exp1, mats_exp2): # give tuples (true, recon)
     corr_data = pd.concat([corr_data_1, corr_data_2])
     return corr_data
 
-def wandb_plot_test_recon_corr(wandb, recon_mat, true_mat, mape_mat, exp_name, is_full_model = False, exp_num = None):
+def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, mape_mat, is_full_model = False, run_num = None):
+    suffix =''
     if is_full_model:
-        suffix = f"_{exp_num}"
+        suffix = f"_run{run_num}"
+
     fig_path = f"{work_dir}/results/figures/test_recon_corr_{exp_name}{suffix}.png"
 
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
@@ -205,7 +207,7 @@ def wandb_plot_test_recon_corr(wandb, recon_mat, true_mat, mape_mat, exp_name, i
     wandb.log({f"Corr(True, Recon) | All Test | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_individual_recon(wandb, test_idx, recon_mat, true_mat, mape_mat, sub_idx):
+def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, true_mat, mape_mat, sub_idx):
 
     sub_idx_in_test = test_idx[sub_idx]
     recon = recon_mat[sub_idx]
@@ -242,13 +244,14 @@ def wandb_plot_individual_recon(wandb, test_idx, recon_mat, true_mat, mape_mat, 
     vmax = 100, vmin=0
     )
     plt.tight_layout()
+
     fig_path = f"{work_dir}/results/figures/individual_recon_sub_{exp_name}_idx_{sub_idx_in_test}.png"
     plt.savefig(fig_path)
     plt.close(fig)
     wandb.log({f"Individual Reconstructions | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_acc_vs_baseline(wandb, data_path, work_dir, exp_name, baseline_exp_name):
+def wandb_plot_acc_vs_baseline(wandb, exp_name, work_dir, data_path, baseline_exp_name):
     
     fig_path = f"{work_dir}/results/figures/corr_violinplot_{exp_name}_vs_{baseline_exp_name}.png"
     
