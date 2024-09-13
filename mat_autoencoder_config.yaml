@@ -1,12 +1,12 @@
-project: "PretrainMatAE_SCZ"
-experiment_name: "mat_ae_test_size0.2"
+project: "PretrainMatAE_ABCD"
+experiment_name: "mat_ae_abcd"
 
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 10
+num_epochs: 100
 batch_size: 32
-kfolds: 2
+kfolds: 5
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
@@ -29,9 +29,9 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 best_fold: 5
 
 # Paths for data
-dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/scz_dataset_400parcels.nc"  
+dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/abcd_dataset_400parcels.nc"  
 targets:
-    - age
+    - cbcl_scr_syn_totprob_r
 
 # Directory for saving results
 work_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"

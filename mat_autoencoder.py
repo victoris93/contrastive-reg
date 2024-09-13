@@ -115,12 +115,13 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="prepost",
-            # gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1,
-            cpus_per_task=40
-            #slurm_constraint="v100-32g",
+            slurm_account="ftj@a100",
+            # slurm_partition="prepost",
+            gpus_per_node=1,
+            # tasks_per_node=1,
+            # nodes=1,
+            # cpus_per_task=40
+            slurm_constraint="a100",
         )
         fold_jobs = []
         with executor.batch():
@@ -150,15 +151,14 @@ def main(cfg: DictConfig):
             # gpus_per_node=1,
             tasks_per_node=1,
             nodes=1,
-            cpus_per_task=10
-            #slurm_constraint="v100-32g",
+            cpus_per_task=20
+            # slurm_constraint="a100",
         # slurm_constraint="a100",
     )
     best_fold = get_best_fold(fold_results)
     job = executor.submit(test_mat_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
                             recon_mat_dir = recon_mat_dir, device = device)
     output = job.result()
-    print(output)
 # -
 
 if __name__ == "__main__":
