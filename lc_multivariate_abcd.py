@@ -21,7 +21,6 @@ from sklearn.model_selection import (
     train_test_split,
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
-from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 # from augmentations import augs, aug_args
 import glob, os, shutil
@@ -51,12 +50,12 @@ SUPCON_KERNELS = {
 }
 
 
-class Experiment(submitit.helpers.Checkpointable):
+class ModelRun(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
         self.embeddings = None 
 
-    def __call__(self, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, cfg, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -74,8 +73,8 @@ class Experiment(submitit.helpers.Checkpointable):
             losses = []
             self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
 
-            experiment_indices = random_state.choice(indices, experiment_size, replace=False)
-            train_indices, test_indices = train_test_split(experiment_indices, test_size=test_size, random_state=random_state)
+            run_indices = random_state.choice(indices, run_size, replace=False)
+            train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
             train_dataset = Subset(dataset, train_indices)
             test_dataset = Subset(dataset, test_indices)
 
@@ -123,14 +122,14 @@ class Experiment(submitit.helpers.Checkpointable):
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(experiment, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
-            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("experiment = @experiment"))
+            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
+            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
             mean = torch.tensor(mean).to(device)
             std  = torch.tensor(std).to(device)
 
             wandb.init(project=cfg.project,
                 mode = "offline",
-                name=f"TEST_{cfg.experiment_name}_exp{experiment}_train_ratio_{train_ratio}",
+                name=f"TEST_{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
                 dir = cfg.output_dir)
             wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
 
@@ -148,31 +147,33 @@ class Experiment(submitit.helpers.Checkpointable):
                     X_embedded, y_embedded = model.forward(X, y)
                                         
                     if label == 'test' and train_ratio == 1.0:
-                        np.save(f'{recon_mat_dir}/test_idx_exp{experiment}',d_indices)
+                        np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
                         recon_mat = model.decode_features(X_embedded)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         
-                        wandb_plot_test_recon_corr(wandb, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), cfg.experiment_name, True)
-                        wandb_plot_individual_recon(wandb, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0)
+                        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), True, run)
+                        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0, True, run)
 
-                        np.save(f'{recon_mat_dir}/recon_mat_exp{experiment}', recon_mat.cpu().numpy())
-                        np.save(f'{recon_mat_dir}/mape_mat_exp{experiment}', mape_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/recon_mat_run{run}', recon_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/mape_mat_run{run}', mape_mat.cpu().numpy())
                         
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
                     X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
                     y_pred = model.decode_targets(X_emb_reduced)
                     if label == 'test':
+                        epsilon = 1e-8
                         mape =  100 * torch.mean(torch.abs((y - y_pred)) / torch.abs((y + epsilon))).item()
-                        corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
+                        corr =  spearmanr(y.cpu().numpy().flatten(), y_pred.cpu().numpy().flatten())[0]
 
                         wandb.log({
-                            'Test | Target MAPE/val' : mape_batch,
-                            'Test | Target Corr/val': corr_batch,
+                            'Run': run,
+                            'Test | Target MAPE/val' : mape,
+                            'Test | Target Corr/val': corr,
                             'Test | Train ratio' : train_ratio
                             })
             
-                    predictions[(train_ratio, experiment, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
+                    predictions[(train_ratio, run, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
@@ -195,7 +196,7 @@ class Experiment(submitit.helpers.Checkpointable):
         with open(path, "wb") as o:
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
-def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
+def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
     print("Start training...")
 
     # MODEL DIMS
@@ -254,13 +255,10 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
     
     torch.cuda.empty_cache()
     gc.collect()
-
-    tensorboard_dir = os.path.join(cfg.output_dir,cfg.experiment_name, cfg.tensorboard_dir)
-    os.makedirs(tensorboard_dir, exist_ok=True)
     
     wandb.init(project=cfg.project,
         mode = "offline",
-        name=f"{cfg.experiment_name}_exp{experiment}_train_ratio_{train_ratio}",
+        name=f"{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
         dir = cfg.output_dir)
     wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
 
@@ -333,7 +331,8 @@ def train(experiment, train_ratio, train_dataset, test_dataset, mean, std, B_ini
                 
 
                 wandb.log({
-                    'epoch': epoch,
+                    'Epoch': epoch,
+                    'Run': run,
                     'total_loss': loss_terms_batch['loss'],
                     'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
@@ -394,10 +393,8 @@ def main(cfg: DictConfig):
 
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
-    tensorboard_dir = os.path.join(results_dir, cfg.tensorboard_dir)
-    os.makedirs(tensorboard_dir, exist_ok=True)
 
-    random_state = np.random.RandomState(seed=123)
+    random_state = np.random.RandomState(seed=42)
 
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
@@ -407,8 +404,9 @@ def main(cfg: DictConfig):
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
-    experiments = cfg.experiments
+    n_runs = cfg.n_runs
     multi_gpu = cfg.multi_gpu
+    train_ratio = cfg.train_ratio
 
     if multi_gpu:
         log_folder = Path("logs")
@@ -421,39 +419,36 @@ def main(cfg: DictConfig):
             nodes=1,
             cpus_per_task=30
             #slurm_constraint="v100-32g",
-
         )
-        experiment_jobs = []
+        run_jobs = []
 
         with executor.batch():
-            for train_ratio in tqdm(np.linspace(.1, 1., 5)):
-                train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-                experiment_size = test_size + train_size
-                for experiment in tqdm(range(experiments)):
-                    run_experiment = Experiment()
-                    job = executor.submit(run_experiment, train, test_size, indices, train_ratio, experiment_size, experiment, dataset, cfg, random_state=random_state, device=None)
-                    experiment_jobs.append(job)
+            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
+            run_size = test_size + train_size
+            for run in tqdm(range(n_runs)):
+                run_model = ModelRun()
+                job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                run_jobs.append(job)
 
-        async def get_result(experiment_jobs):
-            experiment_results = []
-            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in experiment_jobs]), total=len(experiment_jobs)):
+        async def get_result(run_jobs):
+            run_results = []
+            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in run_jobs]), total=len(run_jobs)):
                 res = await aws
-                experiment_results.append(res)
-            return experiment_results
-        experiment_results = asyncio.run(get_result(experiment_jobs))
+                run_results.append(res)
+            return run_results
+        run_results = asyncio.run(get_result(run_jobs))
 
     else:
-        experiment_results = []
+        run_results = []
         
-        for train_ratio in tqdm(np.linspace(.1, 1., 5), desc="Training Size"):
-            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-            experiment_size = test_size + train_size
-            for experiment in tqdm(range(experiments), desc="Experiment"):
-                run_experiment = Experiment()
-                job = run_experiment(train, test_size, indices, train_ratio, experiment_size, experiment, dataset, cfg, random_state=random_state, device=None)
-                experiment_results.append(job)
+        train_size = int(n_sub * (1 - test_ratio) * train_ratio)
+        run_size = test_size + train_size
+        for run in tqdm(range(n_runs), desc="Model Run"):
+            run_model = ModelRun()
+            job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+            run_results.append(job)
 
-    losses, predictions, embeddings = zip(*experiment_results)
+    losses, predictions, embeddings = zip(*run_results)
 
     prediction_metrics = predictions[0]
     for prediction in predictions[1:]:
@@ -464,7 +459,7 @@ def main(cfg: DictConfig):
         true_targets, predicted_targets, indices = v
         
         true_targets_dict = {"train_ratio": [k[0]] * len(true_targets),
-                             "experiment":[k[1]] * len(true_targets),
+                             "model_run":[k[1]] * len(true_targets),
                              "dataset":[k[2]] * len(true_targets)
                             }
         predicted_targets_dict = {"indices": indices}
@@ -491,7 +486,7 @@ def main(cfg: DictConfig):
             prediction_mape_by_element.append(
                 {
                     'train_ratio': k[0],
-                    'experiment': k[1],
+                    'model_run': k[1],
                     'dataset': k[2],
                     'mape': mape
                 }
@@ -499,13 +494,13 @@ def main(cfg: DictConfig):
 
     df = pd.DataFrame(prediction_mape_by_element)
     df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-    df.columns = ['train_ratio', 'experiment', 'dataset'] + targets
-    df= df.groupby(['train_ratio', 'experiment', 'dataset']).agg('mean').reset_index()
+    df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
+    df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
     df.to_csv(f"{results_dir}/mape.csv", index = False)
 
     embedding_data = []
-    for experiment_embedding in embeddings:
-        for key, values in experiment_embedding.items():
+    for run_embedding in embeddings:
+        for key, values in run_embedding.items():
             for value in values:
                 embedding_data.append({
                     'dataset': key,
