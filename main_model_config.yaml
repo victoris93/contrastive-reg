@@ -1,5 +1,5 @@
-project: "PhenProjAge"
-experiment_name: "main_model"
+project: "PhenProjCBCL | MatAE Pretrained"
+experiment_name: "main_model_train_ratio1.0"
 hypothesis: "Age is an easier task than psychopathology"
 
 # Model dimensions
@@ -9,20 +9,23 @@ hidden_dim_feat: 1000
 input_dim_target: 1
 output_dim_target: 2
 
-# MatAutoencoder enhancements
+# MatAutoencoder options
 skip_enc1: True
 ReEig: False
+mat_ae_pretrained: True
+pretrained_mat_ae_exp: "mat_ae_abcd"
 
 # Training parameters
 multi_gpu: True
 num_epochs: 100
 batch_size: 32
-experiments: 1
+n_runs: 10
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio: 0.2
+train_ratio: 1.0
 
 # Contrastive loss parameters
 SupCon_kernel: cauchy
@@ -46,12 +49,12 @@ target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/scz_dataset_400parcels.nc"
+dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/abcd_dataset_400parcels.nc"
 targets:
-    - age
+    - cbcl_scr_syn_totprob_r
 
 # Directory for saving results
-working_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
+work_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
 tensorboard_dir: tensorboard
