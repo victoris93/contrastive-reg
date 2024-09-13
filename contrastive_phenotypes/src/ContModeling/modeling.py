@@ -28,9 +28,10 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
 import sys
-from .utils import get_best_fold, mape_between_subjects, mean_correlations_between_subjects
+from .utils import mape_between_subjects, mean_correlations_between_subjects
 from .losses import LogEuclideanLoss, NormLoss
 from .models import MatAutoEncoder
+from .viz_func import load_mape, load_recon_mats, load_true_mats, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .helper_classes import MatData
 
 #Input to the train autoencoder function is train_dataset.dataset.matrices
@@ -157,7 +158,6 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
     model = MatAutoEncoder(
             input_dim_feat,
             output_dim_feat,
-            torch.randn(input_dim_feat, output_dim_feat),
             dropout_rate,
             cfg
             ).to(device)
@@ -200,6 +200,7 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
             test_mape += mape
 
             wandb.log({
+                'Fold': best_fold,
                 'Test Batch' : i+1,
                 'Test | MAPE' : mape,
                 'Test | Mean Corr' : mean_corr,

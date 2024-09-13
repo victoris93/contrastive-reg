@@ -119,7 +119,7 @@ def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_nu
 
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"recon_mat{recon_path_suffix}" in file])
+    recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"recon_mat" in file and recon_path_suffix in file])
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
     
@@ -207,7 +207,10 @@ def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, m
     wandb.log({f"Corr(True, Recon) | All Test | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, true_mat, mape_mat, sub_idx):
+def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, true_mat, mape_mat, sub_idx, is_full_model = False, run_num = None):
+    suffix =''
+    if is_full_model:
+        suffix = f"_run{run_num}"
 
     sub_idx_in_test = test_idx[sub_idx]
     recon = recon_mat[sub_idx]
@@ -245,7 +248,7 @@ def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, 
     )
     plt.tight_layout()
 
-    fig_path = f"{work_dir}/results/figures/individual_recon_sub_{exp_name}_idx_{sub_idx_in_test}.png"
+    fig_path = f"{work_dir}/results/figures/individual_recon_{exp_name}{suffix}_idx_{sub_idx_in_test}.png"
     plt.savefig(fig_path)
     plt.close(fig)
     wandb.log({f"Individual Reconstructions | {exp_name}": wandb.Image(fig_path)})
