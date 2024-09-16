@@ -73,8 +73,15 @@ class ModelRun(submitit.helpers.Checkpointable):
             losses = []
             self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
 
-            run_indices = random_state.choice(indices, run_size, replace=False)
-            train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
+        
+            if cfg.mat_ae_pretrained:
+                print("Loading test indices from the pretraining experiment...")
+                test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
+                train_indices = np.setdiff1d(indices, test_indices)
+            else:
+                run_indices = random_state.choice(indices, run_size, replace=False)
+                train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
+            
             train_dataset = Subset(dataset, train_indices)
             test_dataset = Subset(dataset, test_indices)
 
@@ -82,9 +89,10 @@ class ModelRun(submitit.helpers.Checkpointable):
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
             train_targets, mean, std= standardize(train_targets)
 
-            ## Weight initialization for bilinear layer
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
+
+            ## Weight initialization for bilinear layer
             mean_f = torch.mean(train_features, dim=0).to(device)
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
@@ -120,11 +128,11 @@ class ModelRun(submitit.helpers.Checkpointable):
             
             train_dataset = TensorDataset(train_features, torch.from_numpy(train_targets).to(torch.float32))
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
-            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
             loss_terms, model = train(run, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
-            mean = torch.tensor(mean).to(device)
+
+            mean = torch.tensor(mean).to(device) #do we need this?
             std  = torch.tensor(std).to(device)
 
             wandb.init(project=cfg.project,
@@ -180,7 +188,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                             'target_embedded': y_embedded[i].cpu().numpy(),
                             'feature_embedded': X_emb_reduced[i].cpu().numpy()
                         })
-                    
+            wandb.finish()        
             self.results = (losses, predictions, self.embeddings)
             
         if path:
@@ -230,8 +238,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             cfg
         ).to(device)
 
-    model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    if cfg.mat_ae_pretrained:
+        print("Loading pretrained MatrixAutoencoder...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
+        model.matrix_ae.load_state_dict(state_dict)
+        for param in model.matrix_ae.parameters():
+            param.requires_grad = False
+    else:
+        model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
 
     criterion_pft = KernelizedSupCon(
         method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
@@ -276,9 +291,10 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 ## FEATURE ENCODING
                 embedded_feat = model.encode_features(features)
                 ## FEATURE DECODING
-                reconstructed_feat = model.decode_features(embedded_feat)
-                ## FEATURE DECODING LOSS
-                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
+                if not cfg.mat_ae_pretrained:
+                    reconstructed_feat = model.decode_features(embedded_feat)
+                    ## FEATURE DECODING LOSS
+                    feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
 
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
@@ -314,7 +330,10 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
 
                 ## SUM ALL LOSSES
-                loss = feature_autoencoder_loss + kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
+
+                if not cfg.mat_ae_pretrained:
+                    loss += feature_autoencoder_loss
 
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -322,19 +341,22 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 
                 loss_terms_batch['loss'] = loss.item() / len(train_loader)
-                loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(train_loader)
                 loss_terms_batch['joint_embedding_loss'] = joint_embedding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-                
+
+                if not cfg.mat_ae_pretrained:
+                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
+                    wandb.log({
+                        'feature_autoencoder_loss': feature_autoencoder_loss
+                    })
 
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
-                    'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
                     'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
@@ -514,5 +536,6 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
+
 
 
