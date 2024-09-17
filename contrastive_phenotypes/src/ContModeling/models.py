@@ -8,7 +8,7 @@ class PhenoProj(nn.Module):
         self,
         input_dim_feat,
         input_dim_target,
-        hidden_dim_feat,
+        hidden_dim,
         output_dim_target,
         output_dim_feat,
         dropout_rate,
@@ -18,7 +18,7 @@ class PhenoProj(nn.Module):
 
         self.input_dim_feat = input_dim_feat
         self.input_dim_target = input_dim_target
-        self.hidden_dim_feat = hidden_dim_feat
+        self.hidden_dim = hidden_dim
         self.output_dim_target = output_dim_target
         self.output_dim_feat = output_dim_feat
         self.dropout_rate = dropout_rate
@@ -30,7 +30,7 @@ class PhenoProj(nn.Module):
                                         cfg)
         
         self.target_ae = TargetAutoEncoder(input_dim_target,
-                                           hidden_dim_feat,
+                                           hidden_dim,
                                            output_dim_target,
                                            dropout_rate)
 
@@ -42,11 +42,11 @@ class PhenoProj(nn.Module):
         self.init_weights(self.target_ae.decode_target)
         
         self.feat_to_target_embedding = nn.Sequential(
-            nn.Linear(self.vectorized_feat_emb_dim, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
+            nn.Linear(self.vectorized_feat_emb_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim_target),
+            nn.Linear(hidden_dim, output_dim_target),
             
         )
         self.init_weights(self.feat_to_target_embedding)
@@ -126,26 +126,26 @@ class TargetAutoEncoder(nn.Module):
     def __init__(
         self,
         input_dim_target,
-        hidden_dim_feat,
+        hidden_dim,
         output_dim_target,
         dropout_rate
     ):
         super(TargetAutoEncoder, self).__init__()
 
         self.encode_target = nn.Sequential(
-            nn.Linear(input_dim_target, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
+            nn.Linear(input_dim_target, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, output_dim_target),
+            nn.Linear(hidden_dim, output_dim_target),
         )
 
         self.decode_target = nn.Sequential(
-            nn.Linear(output_dim_target, hidden_dim_feat),
-            nn.BatchNorm1d(hidden_dim_feat),
+            nn.Linear(output_dim_target, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim_feat, input_dim_target),
+            nn.Linear(hidden_dim, input_dim_target),
         )
 
     def encode_targets(self, y):

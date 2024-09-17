@@ -30,7 +30,7 @@ from geoopt.optim import RiemannianAdam
 import sys
 from .utils import mape_between_subjects, mean_correlations_between_subjects
 from .losses import LogEuclideanLoss, NormLoss
-from .models import MatAutoEncoder
+from .models import MatAutoEncoder, TargetAutoEncoder
 from .viz_func import load_mape, load_recon_mats, load_true_mats, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .helper_classes import MatData
 
@@ -80,14 +80,12 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                                                      patience = cfg.scheduler_patience)
     
     loss_terms = []
-    perf_metrics = []
         
     model.train()
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
-            recon_loss = 0
             loss_terms_batch = defaultdict(lambda:0)
-            for features, targets in train_loader:
+            for features, _ in train_loader:
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -95,7 +93,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
                 
-                loss = recon_loss + criterion(features,reconstructed_feat)
+                loss = criterion(features,reconstructed_feat)
                 loss.backward()
                 optimizer_autoencoder.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
@@ -105,7 +103,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             val_mean_corr = 0
             val_mape = 0
             with torch.no_grad():
-                for features, targets in val_loader:
+                for features, _ in val_loader:
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
@@ -140,19 +138,121 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
     
     return loss_terms, model.state_dict(), val_loss.item()
 
+def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, model=None):
+
+    wandb.init(project=cfg.project,
+       mode = "offline",
+       name=cfg.experiment_name,
+       dir = cfg.output_dir,
+       config = OmegaConf.to_container(cfg, resolve=True))
+    
+    input_dim_target = cfg.input_dim_target
+    output_dim_target = cfg.output_dim_target
+    hidden_dim = cfg.hidden_dim
+
+    batch_size = cfg.batch_size
+    lr = cfg.lr
+    weight_decay = cfg.weight_decay
+    dropout_rate = cfg.dropout_rate
+    num_epochs = cfg.num_epochs
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    if model is None:
+        model = TargetAutoEncoder(
+            input_dim_target,
+            hidden_dim,
+            output_dim_target,
+            dropout_rate,
+            cfg
+        ).to(device)
+        
+    if cfg.loss_function == 'LogEuclidean':
+        criterion = LogEuclideanLoss()
+        optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    elif cfg.loss_function == 'Norm':
+        criterion = NormLoss()
+        optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    elif cfg.loss_function == 'MSE':
+        criterion = nn.functional.mse_loss
+        optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    else:
+        raise ValueError("Unsupported loss function specified in config")
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder,
+                                                     factor=0.1,
+                                                     patience = cfg.scheduler_patience)
+    
+    loss_terms = []
+        
+    model.train()
+    with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
+        for epoch in pbar:
+            loss_terms_batch = defaultdict(lambda:0)
+            for _, targets in train_loader:
+                
+                optimizer_autoencoder.zero_grad()
+                targets = targets.to(device)
+                
+                embedded_targets = model.encode_targets(targets)
+                decoded_targets = model.decode_targets(embedded_targets)
+                
+                loss = criterion(targets,decoded_targets)
+                loss.backward()
+                optimizer_autoencoder.step()
+                loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                
+            model.eval()
+            val_loss = 0
+            val_mean_corr = 0
+            val_mape = 0
+            epsilon = 1e-8
+            with torch.no_grad():
+                for _, targets in val_loader:
+                    targets = targets.to(device)
+
+                    embedded_targets = model.encodencode_targetse_feat(targets)
+                    decoded_targets = model.decode_targets(embedded_targets)
+                    
+                    val_loss += criterion(targets, decoded_targets)
+                    val_mean_corr += spearmanr(targets.cpu().numpy().flatten(), decoded_targets.cpu().numpy().flatten())[0]
+                    val_mape += torch.mean(torch.abs((targets - decoded_targets)) / torch.abs((targets + epsilon))) * 100
+                
+            val_loss /= len(val_loader)
+            val_mean_corr /= len(val_loader)
+            val_mape /= len(val_loader)
+            
+            wandb.log({
+                "Fold" : fold,
+                "Epoch" : epoch,
+                "Loss/val" : val_loss.item(),
+                "Metric/val_mean_corr" : val_mean_corr,
+                "Metric/val_mape" : val_mape
+            })
+            
+            loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
+            
+            scheduler.step(val_loss)
+            if np.log10(scheduler._last_lr[0]) < -4:
+                break
+
+            pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
+            
+    wandb.finish()
+    print(loss_terms)
+    
+    return loss_terms, model.state_dict(), val_loss.item()
+
 def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
     
     wandb.init(project=cfg.project,
         mode = "offline",
         name=f"TEST_{cfg.experiment_name}",
-        dir = cfg.output_dir)
-    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+        dir = cfg.output_dir,
+        config = OmegaConf.to_container(cfg, resolve=True))
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
     input_dim_feat = cfg.input_dim_feat
     output_dim_feat = cfg.output_dim_feat
-    lr = cfg.lr
-    weight_decay = cfg.weight_decay
     dropout_rate = cfg.dropout_rate
 
     model = MatAutoEncoder(
@@ -180,7 +280,7 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
         raise ValueError("Unsupported loss function specified in config")
 
     with torch.no_grad():
-        for i, (features, targets) in enumerate(test_loader):
+        for i, (features, _) in enumerate(test_loader):
 
             features = features.to(device)
 
@@ -215,6 +315,88 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
 
         wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat, true_mat, mape_mat)
         wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, test_idx, recon_mat, true_mat, mape_mat, 0)
+
+        
+    wandb.finish()
+
+            
+    test_loss /= len(test_loader)
+    test_mean_corr /= len(test_loader)
+    test_mape /= len(test_loader)
+    print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
+
+
+def test_target_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_targets_dir, device):
+    
+    wandb.init(project=cfg.project,
+        mode = "offline",
+        name=f"TEST_{cfg.experiment_name}",
+        dir = cfg.output_dir,
+        config = OmegaConf.to_container(cfg, resolve=True))
+
+    test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
+    input_dim_target = cfg.input_dim_target
+    output_dim_target = cfg.output_dim_target
+    hidden_dim = cfg.hidden_dim
+    dropout_rate = cfg.dropout_rate
+
+    model = TargetAutoEncoder(
+            input_dim_target,
+            hidden_dim,
+            output_dim_target,
+            dropout_rate,
+            cfg
+            ).to(device)
+    
+    model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}.pth")) # Load the best fold weights
+    
+    model.eval()
+    test_loss = 0
+    test_mean_corr = 0
+    test_mape = 0
+    
+
+    if cfg.loss_function == 'LogEuclidean':
+            criterion = LogEuclideanLoss()
+    elif cfg.loss_function == 'Norm':
+            criterion = NormLoss()
+    elif cfg.loss_function == 'MSE':
+            criterion = LogEuclideanLoss()
+    else:
+        raise ValueError("Unsupported loss function specified in config")
+
+    epsilon = 1e-8
+    with torch.no_grad():
+        for i, (_, targets) in enumerate(test_loader):
+
+            targets = targets.to(device)
+
+            embedded_targets = model.encode_targets(targets)
+            decoded_targets = model.decode_targets(embedded_targets)
+
+            np.save(f'{recon_targets_dir}/recon_targets_fold{best_fold}_batch_{i+1}', decoded_targets.cpu().numpy())
+
+            loss = criterion(targets, decoded_targets)
+            mape = torch.mean(torch.abs((targets - decoded_targets)) / torch.abs((targets + epsilon))) * 100
+            mean_corr = spearmanr(targets.cpu().numpy().flatten(), decoded_targets.cpu().numpy().flatten())[0]
+
+            test_loss += loss
+            test_mean_corr += mean_corr
+            test_mape += mape
+
+            wandb.log({
+                'Fold': best_fold,
+                'Test Batch' : i+1,
+                'Test | MAPE' : mape,
+                'Test | Mean Corr' : mean_corr,
+                'Test | Loss': loss,
+                })
+        
+        # recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False)
+        # true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False)
+        # mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
+        # test_idx_path = f"{cfg.work_dir}/results/{cfg.experiment_name}/test_idx.npy"
+        # test_idx = np.load(test_idx_path)
 
         
     wandb.finish()
