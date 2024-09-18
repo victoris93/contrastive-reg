@@ -138,8 +138,8 @@ class ModelRun(submitit.helpers.Checkpointable):
             wandb.init(project=cfg.project,
                 mode = "offline",
                 name=f"TEST_{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
-                dir = cfg.output_dir)
-            wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+                dir = cfg.output_dir,
+                config = OmegaConf.to_container(cfg, resolve=True))
 
             model.eval()
             with torch.no_grad():
@@ -210,7 +210,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     # MODEL DIMS
     input_dim_feat = cfg.input_dim_feat
     input_dim_target = cfg.input_dim_target
-    hidden_dim_feat = cfg.hidden_dim_feat
+    hidden_dim = cfg.hidden_dim
     output_dim_target = cfg.output_dim_target
     output_dim_feat = cfg.output_dim_feat
     kernel = SUPCON_KERNELS[cfg.SupCon_kernel]
@@ -231,7 +231,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         model = PhenoProj(
             input_dim_feat,
             input_dim_target,
-            hidden_dim_feat,
+            hidden_dim,
             output_dim_target,
             output_dim_feat,
             dropout_rate,
@@ -242,11 +242,14 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         print("Loading pretrained MatrixAutoencoder...")
         state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
         model.matrix_ae.load_state_dict(state_dict)
-        for param in model.matrix_ae.parameters():
-            param.requires_grad = False
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
         model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    
+    if cfg.target_ae_pretrained:
+        print("Loading pretrained TargetAutoencoder...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_target_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_target_ae_fold}.pth")
+        model.target_ae.load_state_dict(state_dict)
 
     criterion_pft = KernelizedSupCon(
         method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
@@ -274,8 +277,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     wandb.init(project=cfg.project,
         mode = "offline",
         name=f"{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
-        dir = cfg.output_dir)
-    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+        dir = cfg.output_dir,
+        config = OmegaConf.to_container(cfg, resolve=True))
 
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
@@ -295,12 +298,18 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     reconstructed_feat = model.decode_features(embedded_feat)
                     ## FEATURE DECODING LOSS
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
-
+                
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
-                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)                
+                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
+
                 out_target = model.encode_targets(targets)
+                out_target_decoded = model.decode_targets(out_target)
+
+                if not cfg.target_ae_pretrained:
+                    ## TARGET DECODING LOSS; computed if target autoencoder is not pretrained
+                    target_decoding_loss = target_decoding_crit(targets, out_target_decoded) 
 
                 if cfg.joint_embedding_crit == 'cosine':
                     joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
@@ -330,10 +339,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_from_reduced_emb_loss
 
                 if not cfg.mat_ae_pretrained:
                     loss += feature_autoencoder_loss
+                if not cfg.target_ae_pretrained:
+                    loss += target_decoding_loss
 
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -344,15 +355,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(train_loader)
                 loss_terms_batch['joint_embedding_loss'] = joint_embedding_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-
-                if not cfg.mat_ae_pretrained:
-                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
-                    wandb.log({
-                        'feature_autoencoder_loss': feature_autoencoder_loss
-                    })
-
+                
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
@@ -360,9 +364,19 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
                     'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
-                    'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
+                
+                if not cfg.mat_ae_pretrained:
+                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
+                    wandb.log({
+                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
+                    })
+                if not cfg.target_ae_pretrained:
+                    loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
+                    wandb.log({
+                        'target_decoding_loss': loss_terms_batch['target_decoding_loss']
+                    })
 
             loss_terms_batch['epoch'] = epoch
             loss_terms.append(loss_terms_batch)
@@ -431,12 +445,13 @@ def main(cfg: DictConfig):
     train_ratio = cfg.train_ratio
 
     if multi_gpu:
+        print("Using multi-gpu")
         log_folder = Path("logs")
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="prepost",
-            # gpus_per_node=1,
+            slurm_partition="gpu_short",
+            gpus_per_node=1,
             tasks_per_node=1,
             nodes=1,
             cpus_per_task=30
@@ -462,7 +477,6 @@ def main(cfg: DictConfig):
 
     else:
         run_results = []
-        
         train_size = int(n_sub * (1 - test_ratio) * train_ratio)
         run_size = test_size + train_size
         for run in tqdm(range(n_runs), desc="Model Run"):
