@@ -210,7 +210,7 @@ def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, mode
                 for _, targets in val_loader:
                     targets = targets.to(device)
 
-                    embedded_targets = model.encodencode_targetse_feat(targets)
+                    embedded_targets = model.encode_targets(targets)
                     decoded_targets = model.decode_targets(embedded_targets)
                     
                     val_loss += criterion(targets, decoded_targets)
@@ -275,7 +275,7 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
     elif cfg.loss_function == 'Norm':
             criterion = NormLoss()
     elif cfg.loss_function == 'MSE':
-            criterion = LogEuclideanLoss()
+            criterion = nn.functional.mse_loss
     else:
         raise ValueError("Unsupported loss function specified in config")
 
@@ -361,7 +361,7 @@ def test_target_autoencoder(best_fold, test_dataset, cfg, model_params_dir, reco
     elif cfg.loss_function == 'Norm':
             criterion = NormLoss()
     elif cfg.loss_function == 'MSE':
-            criterion = LogEuclideanLoss()
+            criterion = nn.functional.mse_loss
     else:
         raise ValueError("Unsupported loss function specified in config")
 

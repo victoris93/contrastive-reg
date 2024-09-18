@@ -128,7 +128,8 @@ class TargetAutoEncoder(nn.Module):
         input_dim_target,
         hidden_dim,
         output_dim_target,
-        dropout_rate
+        dropout_rate,
+        cfg # just in case
     ):
         super(TargetAutoEncoder, self).__init__()
 

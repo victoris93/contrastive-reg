@@ -30,14 +30,15 @@ class FoldTrain(submitit.helpers.Checkpointable):
                 random_state = np.random.RandomState(random_state)
         
         self.fold = fold + 1
+        
+        print(f"Fold {self.fold}")
+        fold_train_dataset = Subset(train_dataset, train_idx)
+        fold_val_dataset = Subset(train_dataset, val_idx)
+
+        self.fold = fold + 1
         if cfg.input_type == "matrices":
             input_dim_feat=cfg.input_dim_feat
             output_dim_feat=cfg.output_dim_feat
-
-
-            print(f"Fold {self.fold}")
-            fold_train_dataset = Subset(train_dataset, train_idx)
-            fold_val_dataset = Subset(train_dataset, val_idx)
             
             train_features = torch.stack([fold_train_dataset[i][0] for i in range(len(fold_train_dataset))])
             mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
