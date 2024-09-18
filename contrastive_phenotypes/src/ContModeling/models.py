@@ -32,7 +32,8 @@ class PhenoProj(nn.Module):
         self.target_ae = TargetAutoEncoder(input_dim_target,
                                            hidden_dim,
                                            output_dim_target,
-                                           dropout_rate)
+                                           dropout_rate,
+                                           cfg)
 
         A = np.random.rand(output_dim_feat, output_dim_feat)
         A = (A + A.T) / 2
