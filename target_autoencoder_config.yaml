@@ -1,5 +1,5 @@
 project: "PretrainTargetAE"
-experiment_name: "target_ae"
+experiment_name: "out2_target_ae"
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
@@ -12,11 +12,11 @@ dropout_rate: 0
 scheduler_patience: 10
 seed: 42
 test_size: 0.2
-input_type: "matrices" # Options: matrices, targets
+input_type: "targets" # Options: matrices, targets
 # Model dimensions
 input_dim_target: 1
 hidden_dim: 1000
-output_dim_target: 100
+output_dim_target: 2
 
 # Loss function and optimizer
 loss_function: MSE  # Options: LogEuclidean, Norm, MSE
