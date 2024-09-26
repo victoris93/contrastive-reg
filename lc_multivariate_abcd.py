@@ -321,7 +321,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                                                                       out_target
                                                                       )
                 
-                kernel_embedded_feature_loss = 10 * criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
+                kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
 
                 ## TARGET DECODING FROM TARGET EMBEDDING
                 out_target_decoded = model.decode_targets(out_target)               
@@ -347,6 +347,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss += target_decoding_loss
 
                 loss.backward()
+
+                for name, param in model.named_parameters():
+                    wandb.log({
+                        "Epoch": epoch,
+                        f"Gradient Norm/{name}": param.grad.norm().item()
+                        })
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
@@ -357,6 +363,20 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss_terms_batch['joint_embedding_loss'] = joint_embedding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
                 
+                
+                if not cfg.mat_ae_pretrained:
+                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
+                    })
+                if not cfg.target_ae_pretrained:
+                    loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'target_decoding_loss': loss_terms_batch['target_decoding_loss']
+                    })
+                
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
@@ -366,17 +386,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
-                
-                if not cfg.mat_ae_pretrained:
-                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
-                    wandb.log({
-                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
-                    })
-                if not cfg.target_ae_pretrained:
-                    loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
-                    wandb.log({
-                        'target_decoding_loss': loss_terms_batch['target_decoding_loss']
-                    })
 
             loss_terms_batch['epoch'] = epoch
             loss_terms.append(loss_terms_batch)

@@ -1,4 +1,4 @@
-project: "PhenProjCBCL | AEs Pretrained"
+project: "PhenProj"
 experiment_name: "main_model_train_ratio1.0"
 hypothesis: "-"
 
@@ -14,8 +14,8 @@ skip_enc1: True
 ReEig: False
 
 # Pretrained models options
-mat_ae_pretrained: True
-target_ae_pretrained: True
+mat_ae_pretrained: False
+target_ae_pretrained: False
 pretrained_mat_ae_exp: "mat_ae_abcd"
 pretrained_target_ae_exp: "out2_target_ae"
 best_mat_ae_fold: 3
@@ -25,21 +25,21 @@ best_target_ae_fold: 1
 multi_gpu: True
 num_epochs: 100
 batch_size: 32
-n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
-lr: 0.01
+n_runs: 10 # set 1 if some part of the model is pretrained (the test set should be the same)
+lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_ratio: 0.2 # makes no difference if some part of the model is pretrained
+test_ratio: 0.25 # makes no difference if some part of the model is pretrained
 train_ratio: 1.0
 
 # Contrastive loss parameters
 SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 10
-pft_temperature: 10
-pft_sigma: 50
+pft_base_temperature: 20
+pft_temperature: 20
+pft_sigma: 20
 
 ## target proj vs. targets
 ptt_base_temperature: 0.07
@@ -55,9 +55,9 @@ target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
 targets:
-    - cbcl_scr_syn_totprob_r
+    - pea_wiscv_trs
 
 # Directory for saving results
 work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
