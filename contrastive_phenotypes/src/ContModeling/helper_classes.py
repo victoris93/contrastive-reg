@@ -72,7 +72,7 @@ class MatData(Dataset):
         self.target_names = target_names
         self.threshold = threshold
         self.data_array = xr.open_dataset(dataset_path)
-        self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
+        self.matrices = self.data_array.matrices.values.astype(np.float32)
         if threshold > 0:
             self.matrices = self.threshold_mat(self.matrices, self.threshold)
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
@@ -91,15 +91,8 @@ class MatData(Dataset):
     
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
-        target = torch.from_numpy(np.array([self.data_array.sel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
-        
-    
-    def __len__(self):
-        return self.data_array.subject.__len__()
-    
-    def __getitem__(self, idx):
-        matrix = self.matrices[idx]
-        target = torch.from_numpy(np.array([self.data_array.sel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        target = torch.from_numpy(np.array([self.data_array.isel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
         
         return matrix, target
+
 
