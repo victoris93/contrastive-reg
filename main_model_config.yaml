@@ -35,6 +35,13 @@ train_ratio: 1.0
 log_gradients: True
 clip_grad: True
 
+# test options
+external_test_mode: True
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+
 # Contrastive loss parameters
 SupCon_kernel: cauchy
 

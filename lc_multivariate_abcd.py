@@ -71,17 +71,25 @@ class ModelRun(submitit.helpers.Checkpointable):
             predictions = {}
             autoencoder_features = {}
             losses = []
-            self.embeddings = {'train': [], 'test': []}  # Initialize embeddings dictionary
+            self.embeddings = {'train': [], 'test': []}
 
         
             if cfg.mat_ae_pretrained:
                 print("Loading test indices from the pretraining experiment...")
                 test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
                 train_indices = np.setdiff1d(indices, test_indices)
+            elif cfg.external_test_mode:
+                test_scanners = list(cfg.test_scanners)
+                xr_dataset = xr.open_dataset(cfg.dataset_path)
+                scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
+                                    axis = 0).astype(bool)
+                test_indices = indices[scanner_mask]
+                train_indices = indices[~scanner_mask]
+                del xr_dataset
             else:
                 run_indices = random_state.choice(indices, run_size, replace=False)
                 train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
-            
+                
             train_dataset = Subset(dataset, train_indices)
             test_dataset = Subset(dataset, test_indices)
 
@@ -262,7 +270,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     joint_embedding_crit = EMB_LOSSES[cfg.joint_embedding_crit]
     target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
     target_decoding_from_reduced_emb_crit = EMB_LOSSES[cfg.target_decoding_from_reduced_emb_crit]
-
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
