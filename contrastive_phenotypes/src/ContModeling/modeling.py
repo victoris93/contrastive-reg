@@ -84,8 +84,10 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
     model.train()
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
+            batch = 1
             loss_terms_batch = defaultdict(lambda:0)
             for features, _ in train_loader:
+                batch += 1
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -95,6 +97,18 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                 
                 loss = criterion(features,reconstructed_feat)
                 loss.backward()
+                        
+                if cfg.clip_grad:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                if cfg.log_gradients:
+                    for name, param in model.named_parameters():
+                        wandb.log({
+                            "Epoch": epoch,
+                            "Batch": batch,
+                            f"Gradient Norm/{name}": param.grad.norm().item()
+                            })
+                        
                 optimizer_autoencoder.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 
@@ -188,7 +202,9 @@ def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, mode
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             loss_terms_batch = defaultdict(lambda:0)
+            batch = 1
             for _, targets in train_loader:
+                batch += 1
                 
                 optimizer_autoencoder.zero_grad()
                 targets = targets.to(device)
@@ -197,7 +213,17 @@ def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, mode
                 decoded_targets = model.decode_targets(embedded_targets)
                 
                 loss = criterion(targets,decoded_targets)
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
                 loss.backward()
+
+                for name, param in model.named_parameters():
+                    wandb.log({
+                        "Epoch": epoch,
+                        "Batch": batch,
+                        f"Gradient Norm/{name}": param.grad.norm().item()
+                        })
+                    
                 optimizer_autoencoder.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
                 
@@ -310,7 +336,7 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
         recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False)
         true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False)
         mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
-        test_idx_path = f"{cfg.work_dir}/results/{cfg.experiment_name}/test_idx.npy"
+        test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"
         test_idx = np.load(test_idx_path)
 
         wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat, true_mat, mape_mat)
