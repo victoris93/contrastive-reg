@@ -1,40 +1,49 @@
 project: "PretrainMatAE_ABCD"
-experiment_name: "mat_ae_abcd"
+experiment_name: "large_mat_ae_abcd"
 
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
 num_epochs: 100
-batch_size: 32
+batch_size: 64
 kfolds: 5
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_size : 0.2
+test_size : 0.3
 seed : 42
+log_gradients: True
+clip_grad: True
 
-# non-linearity enhancements
+# test options
+external_test_mode: True
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+# enhancements
 ReEig: False
 skip_enc1: True
 
 # Model dimensions
 input_dim_feat: 400
 output_dim_feat: 50
+input_type: "matrices" # Options: matrices, targets
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 
 # modify manually if test is run as a separate job
-best_fold: 5
+best_fold: 1
 
 # Paths for data
-dataset_path: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/data/abcd_dataset_400parcels.nc"  
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
 targets:
-    - cbcl_scr_syn_totprob_r
+    - pea_wiscv_trs
 
 # Directory for saving results
-work_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
+work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
-output_dir: "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes/results"
+output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"

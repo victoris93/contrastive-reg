@@ -348,12 +348,16 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 loss.backward()
 
-                for name, param in model.named_parameters():
-                    wandb.log({
-                        "Epoch": epoch,
-                        f"Gradient Norm/{name}": param.grad.norm().item()
-                        })
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                if cfg.clip_grad:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
+                if cfg.log_gradients:
+                    for name, param in model.named_parameters():
+                        wandb.log({
+                            "Epoch": epoch,
+                            f"Gradient Norm/{name}": param.grad.norm().item()
+                            })  
+
                 optimizer.step()
 
                 

@@ -30,8 +30,10 @@ lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_ratio: 0.25 # makes no difference if some part of the model is pretrained
+test_ratio: 0.3 # makes no difference if some part of the model is pretrained
 train_ratio: 1.0
+log_gradients: True
+clip_grad: True
 
 # Contrastive loss parameters
 SupCon_kernel: cauchy

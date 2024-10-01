@@ -59,7 +59,20 @@ def main(cfg: DictConfig):
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
     dataset = MatData(dataset_path, targets, threshold=0)
-    train_val_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=cfg.test_size, random_state=random_state)
+    indices = np.arange(len(dataset))
+
+    if cfg.external_test_mode: #deserves a separate function in the long run
+        test_scanners = list(cfg.test_scanners)
+        xr_dataset = xr.open_dataset(cfg.dataset_path)
+        scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
+                              axis = 0).astype(bool)
+        test_idx = indices[scanner_mask]
+        print("Size of test set: ", len(test_idx))
+        train_val_idx = indices[~scanner_mask]
+        print("Size of train set: ", len(train_val_idx))
+    else:
+        train_val_idx, test_idx = train_test_split(indices, test_size=cfg.test_size, random_state=random_state)
+
     train_val_dataset = Subset(dataset, train_val_idx)
     test_dataset = Subset(dataset, test_idx)
     np.save(f"{results_dir}/test_idx.npy", test_idx)
@@ -68,17 +81,15 @@ def main(cfg: DictConfig):
     multi_gpu = cfg.multi_gpu
     
     if multi_gpu:
-        log_folder = Path("./logs")
+        print("Using multi-gpu")
+        log_folder = Path("logs")
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
-            timeout_min=120,
-            slurm_account="ftj@a100",
-            # slurm_partition="prepost",
+            timeout_min=240,
+            slurm_partition="gpu_short",
             gpus_per_node=1,
-            # tasks_per_node=1,
-            # nodes=1,
-            # cpus_per_task=40
-            slurm_constraint="a100",
+            tasks_per_node=1,
+            nodes=1
         )
         fold_jobs = []
         with executor.batch():
@@ -103,14 +114,11 @@ def main(cfg: DictConfig):
     # TEST
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
     executor.update_parameters(
-            timeout_min=120,
-            slurm_partition="prepost",
-            # gpus_per_node=1,
+            timeout_min=240,
+            slurm_partition="gpu_short",
+            gpus_per_node=1,
             tasks_per_node=1,
-            nodes=1,
-            cpus_per_task=20
-            # slurm_constraint="a100",
-        # slurm_constraint="a100",
+            nodes=1
     )
     best_fold = get_best_fold(fold_results)
     job = executor.submit(test_mat_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
