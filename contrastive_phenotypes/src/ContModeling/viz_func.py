@@ -119,7 +119,8 @@ def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_nu
 
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    recon_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"recon_mat" in file and recon_path_suffix in file])
+    recon_mat_files = [file for file in os.listdir(recon_mat_dir) if f"recon_mat" in file and recon_path_suffix in file]
+    recon_mat_files = sorted(recon_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
     
@@ -138,7 +139,7 @@ def load_true_mats(data_path, exp_name, work_dir, vectorize, is_full_model = Fal
     test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)
     dataset = xr.open_dataset(data_path)
-    true_mat = dataset.isel(subject = test_idx).to_array().squeeze().values
+    true_mat = dataset.matrices.isel(subject = test_idx).values
     if vectorize:
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
@@ -150,11 +151,12 @@ def load_mape(exp_name, work_dir, is_full_model = False, run_num = None):
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
     mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"mape_mat{recon_path_suffix}" in file])
+    mape_mat_files = sorted(mape_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     mape_paths = [os.path.join(recon_mat_dir, file) for file in mape_mat_files]
     mape_mat = np.concatenate([np.load(path) for path in mape_paths])
     return mape_mat
 
-def get_corr_data(recon_mat, true_mat, network_labels = NETWORK_LABELS):
+def get_corr_data(exp_name, recon_mat, true_mat, network_labels = NETWORK_LABELS):
 
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
 
