@@ -45,8 +45,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-
-    
+ 
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
     recon_mat_dir = os.path.join(results_dir, cfg.reconstructed_dir)
@@ -61,7 +60,7 @@ def main(cfg: DictConfig):
     dataset = MatData(dataset_path, targets, threshold=0)
     indices = np.arange(len(dataset))
 
-    if cfg.external_test_mode: #deserves a separate function in the long run
+    if cfg.external_test_mode: # deserves a separate function in the long run
         test_scanners = list(cfg.test_scanners)
         xr_dataset = xr.open_dataset(cfg.dataset_path)
         scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
@@ -70,6 +69,7 @@ def main(cfg: DictConfig):
         print("Size of test set: ", len(test_idx))
         train_val_idx = indices[~scanner_mask]
         print("Size of train set: ", len(train_val_idx))
+        del xr_dataset
     else:
         train_val_idx, test_idx = train_test_split(indices, test_size=cfg.test_size, random_state=random_state)
 
