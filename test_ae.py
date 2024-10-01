@@ -18,17 +18,12 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 import glob, os, shutil
 import random
-from torch.utils.tensorboard import SummaryWriter
 import sys
-from viz_func import wandb_plot_corr, wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
-from utils_v import mean_correlations_between_subjects, mape_between_subjects
-from losses import LogEuclideanLoss, NormLoss
-from models import AutoEncoder
-from helper_classes import MatData
-from model_testing import test_mat_autoencoder
+from ContModeling.modeling import test_mat_autoencoder
+from ContModeling.helper_classes import MatData
 
 
-@hydra.main(config_path=".", config_name="autoencoder_config")
+@hydra.main(config_path=".", config_name="mat_autoencoder_config")
 
 def main(cfg: DictConfig):
     
@@ -36,7 +31,7 @@ def main(cfg: DictConfig):
     torch.cuda.empty_cache()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    test_idx_path = f"{cfg.results_dir}/{cfg.experiment_name}/test_idx.npy"
+    test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"
     test_idx = np.load(test_idx_path)
     
     targets = list(cfg.targets)
