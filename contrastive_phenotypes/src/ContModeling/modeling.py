@@ -28,12 +28,13 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
 import sys
-from .utils import mape_between_subjects, mean_correlations_between_subjects
+from .utils import mape_between_subjects, mean_correlations_between_subjects, save_embeddings
 from .losses import LogEuclideanLoss, NormLoss
 from .models import MatAutoEncoder, TargetAutoEncoder
 from .viz_func import load_mape, load_recon_mats, load_true_mats, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .helper_classes import MatData
 
+     
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, device, model=None):
 
@@ -87,7 +88,6 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             batch = 1
             loss_terms_batch = defaultdict(lambda:0)
             for features, _ in train_loader:
-                batch += 1
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -111,22 +111,25 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                         
                 optimizer_autoencoder.step()
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                batch += 1
                 
             model.eval()
             val_loss = 0
             val_mean_corr = 0
             val_mape = 0
+
             with torch.no_grad():
                 for features, _ in val_loader:
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
+                    save_embeddings(embedded_feat, cfg = cfg, fold = fold, epoch = epoch)
                     reconstructed_feat = model.decode_feat(embedded_feat)
                     
                     val_loss += criterion(features, reconstructed_feat)
                     val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                     val_mape += mape_between_subjects(features, reconstructed_feat).item()
-                
+
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
             val_mape /= len(val_loader)
@@ -432,3 +435,4 @@ def test_target_autoencoder(best_fold, test_dataset, cfg, model_params_dir, reco
     test_mean_corr /= len(test_loader)
     test_mape /= len(test_loader)
     print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
+    return None
