@@ -12,6 +12,40 @@ import torch.nn.functional as F
 from pathlib import Path
 from scipy.stats import pearsonr, spearmanr
 
+
+def save_embeddings(embedding, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
+    embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
+    os.makedirs(embedding_dir, exist_ok=True)
+    embedding_numpy = embedding.cpu().detach().numpy()
+
+    if batch is None:
+        batch_suffix = ''
+    else:
+        batch_suffix = f"_batch{batch}"
+
+    if fold is None:
+        fold_suffix = ''
+    else:
+        fold_suffix = f"_fold{fold}"
+
+    if run is None:
+        run_suffix = ''
+    else:
+        run_suffix = f"_run{run}"
+
+    if test:
+        dataset_suffix = "_test"
+    else:
+        dataset_suffix = "_train"
+
+    if epoch is None:
+        epoch_suffix = ''
+    else:
+        epoch_suffix = f"_epoch{epoch}"
+
+    save_path = f"{embedding_dir}/embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{run_suffix}{dataset_suffix}.npy"
+    np.save(save_path, embedding_numpy)
+
 def mean_correlations_between_subjects(y_true, y_pred):
     correlations = []
     y_true = y_true.cpu().detach().numpy()
