@@ -1,5 +1,5 @@
 project: "PretrainMatAE_ABCD"
-experiment_name: "large_mat_ae_abcd"
+experiment_name: "external_mat_ae_abcd"
 
 hypothesis: "-"
 # Training parameters
@@ -28,7 +28,7 @@ skip_enc1: True
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 50
+output_dim_feat: 60
 input_type: "matrices" # Options: matrices, targets
 
 # Loss function and optimizer
@@ -44,6 +44,7 @@ targets:
 
 # Directory for saving results
 work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+embedding_dir : recon_mat
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
 output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"

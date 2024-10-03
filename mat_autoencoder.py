@@ -124,6 +124,7 @@ def main(cfg: DictConfig):
     job = executor.submit(test_mat_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
                             recon_mat_dir = recon_mat_dir, device = device)
     output = job.result()
+    return output
 # -
 
 if __name__ == "__main__":
