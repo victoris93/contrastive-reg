@@ -34,6 +34,10 @@ import random
 from geoopt.optim import RiemannianAdam
 from torch.utils.tensorboard import SummaryWriter
 import sys
+from torch.nn.utils import clip_grad_norm_
+from pymanopt.manifolds import SymmetricPositiveDefinite
+import torch.nn.init as init
+
 # from viz_func import wandb_plot_corr
 
 torch.cuda.empty_cache()
@@ -73,7 +77,30 @@ class LogEuclideanLoss(nn.Module):
         log_features = self.mat_batch_log(features)
         log_recon_features = self.mat_batch_log(recon_features_diag)
         loss = torch.norm(log_features - log_recon_features,
-                          dim=(-2, -1)).mean()
+                          dim=(-2, -1))
+        loss_mean = loss.mean()
+        return loss_mean
+    
+class LogEuclideanLoss2(nn.Module):
+    def __init__(self):
+        super(LogEuclideanLoss2, self).__init__()
+        self.manifold = SymmetricPositiveDefinite(100)
+
+
+    def forward(self, features, recon_features):
+        """
+        Compute the Log-Euclidean distance between two batches of SPD matrices.
+
+        Args:
+            features: Tensor of shape [batch_size, n_parcels, n_parcels]
+            recon_features: Tensor of shape [batch_size, n_parcels, n_parcels]
+
+        Returns:
+            A loss scalar.
+        """
+        features_np = features.detach().cpu().numpy()
+        recon_features_np = recon_features.detach().cpu().numpy()
+        loss = self.manifold.dist(features_np, recon_features_np)
         return loss
 
 class NormLoss(nn.Module):
@@ -280,13 +307,30 @@ def mean_correlation(y_true, y_pred):
     return np.mean(correlations)
 
 
+
+def initialize_model(model, B_init_fMRI, init_method):
+    if init_method == 'classic':
+        init.xavier_uniform_(model.enc_mat1.weight)
+        init.xavier_uniform_(model.enc_mat2.weight)
+    elif init_method == 'eigen':
+        model.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+        model.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+    else:
+        raise ValueError("Unsupported initialization method specified in config")
+
+
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=None, device = device):
-    
+    wandb.init(
+        project=cfg.project,
+        name=f"{cfg.experiment_name}_fold_{fold}",
+        config=OmegaConf.to_container(cfg, resolve=True),
+        reinit=True  # Allows multiple wandb.init() calls in different processes
+    )
     input_dim_feat = cfg.input_dim_feat
     output_dim_feat = cfg.output_dim_feat
     batch_size = cfg.batch_size
-    lr = cfg.model.lr
+    lr = cfg.lr
     print("lr", lr)
     weight_decay = cfg.weight_decay
     dropout_rate = cfg.dropout_rate
@@ -303,11 +347,14 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
             cfg
         ).to(device)
         
-    model.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    model.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-    
+    initialize_model(model, B_init_fMRI, cfg.weight_initialization)
+    model.enc_mat1.weight.requires_grad = True
+    model.enc_mat2.weight.requires_grad = True
     if cfg.loss_function == 'LogEuclidean':
         criterion = LogEuclideanLoss()
+        optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    elif cfg.loss_function == 'LogEuclidean2':
+        criterion = LogEuclideanLoss2()
         optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
     elif cfg.loss_function == 'Norm':
         criterion = NormLoss()
@@ -340,12 +387,14 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
                 
                 embedded_feat = model.encode_feat(features)
                 reconstructed_feat = model.decode_feat(embedded_feat)
-                
+                print("criterion training", criterion(features,reconstructed_feat))
                 loss = recon_loss + criterion(features,reconstructed_feat)
                 loss.backward()
+                clip_grad_norm_(model.parameters(), 1)
                 optimizer_autoencoder.step()
                 writer.add_scalar('Loss/train', loss.item(), epoch)
                 loss_terms_batch['loss'] += loss.item() / len(train_loader)
+
                 
             model.eval()
             val_loss = 0
@@ -357,15 +406,16 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
 
                     embedded_feat = model.encode_feat(features)
                     reconstructed_feat = model.decode_feat(embedded_feat)
-                    
+                    print("criterion", criterion(features, reconstructed_feat) )
                     val_loss += criterion(features, reconstructed_feat)
+                    print("val_loss", val_loss)
                     val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
                     val_mape += mape_between_subjects(features, reconstructed_feat).item()
                 
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
             val_mape /= len(val_loader)
-            
+            wandb.log({"val_loss": val_loss.item()})
             writer.add_scalar('Loss/val', val_loss.item(), epoch)
             writer.add_scalar('Metric/val_mean_corr', val_mean_corr, epoch)
             writer.add_scalar('Metric/val_mape', val_mape, epoch)
@@ -388,7 +438,8 @@ def train_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, model=
 class FoldTrain(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
-
+        
+        
     def __call__(self, fold, train_idx, val_idx, train_dataset, model_params_dir, cfg, random_state=None, device=None, path: Path = None):
         if self.results is None:
             if device is None:
@@ -427,12 +478,13 @@ class FoldTrain(submitit.helpers.Checkpointable):
             pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
 
 # +
-@hydra.main(config_path="conf_feat_ae_skip_conn_optuna", config_name="conf", version_base = None)
+@hydra.main(config_path="conf_feat_ae_skip_conn_optuna", config_name = "conf2", version_base = None)
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    
-    results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
+    print("learnign rate", cfg.lr)
+    run_id = wandb.util.generate_id()
+    results_dir = os.path.join(cfg.output_dir, cfg.experiment_name, run_id)
     os.makedirs(results_dir, exist_ok=True)
     recon_mat_dir = os.path.join(results_dir, cfg.reconstructed_dir)
     os.makedirs(recon_mat_dir, exist_ok=True)
@@ -440,6 +492,8 @@ def main(cfg: DictConfig):
     os.makedirs(model_params_dir, exist_ok=True)
     tensorboard_dir = os.path.join(results_dir, cfg.tensorboard_dir)
     os.makedirs(tensorboard_dir, exist_ok=True)
+    
+    
     
     random_state = np.random.RandomState(seed=42)
     
@@ -501,7 +555,7 @@ def main(cfg: DictConfig):
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
     input_dim_feat = cfg.input_dim_feat
     output_dim_feat = cfg.output_dim_feat
-    lr = cfg.model.lr
+    lr = cfg.lr
 
     weight_decay = cfg.weight_decay
     dropout_rate = cfg.dropout_rate
@@ -521,8 +575,8 @@ def main(cfg: DictConfig):
     test_mean_corr = 0
     test_mape = 0
     
-    wandb.init(project=cfg.project,  name=cfg.experiment_name)
-    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+    #wandb.init(project=cfg.project,  name=cfg.experiment_name)
+    #wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
     
     if cfg.loss_function == 'LogEuclidean':
             criterion = LogEuclideanLoss()
@@ -561,8 +615,14 @@ def main(cfg: DictConfig):
     test_mean_corr /= len(test_loader)
     test_mape /= len(test_loader)
     print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
-    
-# -
+    wandb.log({
+        "Test Loss": test_loss,
+        "Test Mean Corr": test_mean_corr,
+        "Test MAPE": test_mape
+    })
 
+    wandb.finish()
+    print(f"OBJECTIVE: {test_loss}")  # Hydra-Optuna sweeper can capture this if configured
+    return test_loss
 if __name__ == "__main__":
     main()
