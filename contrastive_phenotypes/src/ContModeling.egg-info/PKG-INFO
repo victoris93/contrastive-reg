@@ -1,0 +1,27 @@
+Metadata-Version: 2.1
+Name: ContModeling
+Version: 0.0.0
+Author: Malo Renaudin
+Author-email: malorenaudin1@gmail.com
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.6
+License-File: LICENSE.txt
+Requires-Dist: torch
+Requires-Dist: xarray
+Requires-Dist: geoopt
+Requires-Dist: nilearn
+Requires-Dist: numpy
+Requires-Dist: omegaconf
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: scikit-learn
+Requires-Dist: submitit
+Requires-Dist: wandb
+Requires-Dist: xarray
+Requires-Dist: matplotlib
+Requires-Dist: seaborn

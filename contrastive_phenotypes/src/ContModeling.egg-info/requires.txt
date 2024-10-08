@@ -1,0 +1,14 @@
+torch
+xarray
+geoopt
+nilearn
+numpy
+omegaconf
+pandas
+scipy
+scikit-learn
+submitit
+wandb
+xarray
+matplotlib
+seaborn
