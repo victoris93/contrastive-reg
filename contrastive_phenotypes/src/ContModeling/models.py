@@ -70,7 +70,9 @@ class PhenoProj(nn.Module):
         return self.target_ae.decode_targets(embedding)
     
     def transfer_embedding(self, feat_embedding): # note that the feat embedding was vectorized
-        return self.feat_to_target_embedding(feat_embedding)
+        feat_embedding_transfer = self.feat_to_target_embedding(feat_embedding)
+        feat_embedding_transfer = nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
+        return feat_embedding_transfer
 
     def forward(self, x, y):
         x_embedding = self.encode_features(x)
@@ -152,7 +154,7 @@ class TargetAutoEncoder(nn.Module):
 
     def encode_targets(self, y):
         target_embedding = self.encode_target(y)
-        target_embedding = nn.functional.normalize(target_embedding, p=2, dim=1)
+        target_embedding = nn.functional.normalize(target_embedding, p=2, dim=1) # do we want to do this?
         return target_embedding
 
     def decode_targets(self, target_embedding):
