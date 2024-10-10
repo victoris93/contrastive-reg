@@ -26,7 +26,7 @@ from tqdm.auto import tqdm
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
-from ContModeling.utils import gaussian_kernel, cauchy, multivariate_cauchy, standardize
+from ContModeling.utils import gaussian_kernel, cauchy, multivariate_cauchy, standardize, save_embeddings
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
@@ -65,6 +65,7 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             augmentations = cfg.augmentation
 
+            print
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
     
@@ -73,7 +74,6 @@ class ModelRun(submitit.helpers.Checkpointable):
             losses = []
             self.embeddings = {'train': [], 'test': []}
 
-        
             if cfg.mat_ae_pretrained:
                 print("Loading test indices from the pretraining experiment...")
                 test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
@@ -148,6 +148,9 @@ class ModelRun(submitit.helpers.Checkpointable):
                 name=f"TEST_{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
                 dir = cfg.output_dir,
                 config = OmegaConf.to_container(cfg, resolve=True))
+            
+            embedding_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.embedding_dir)
+            os.makedirs(embedding_dir, exist_ok=True)
 
             model.eval()
             with torch.no_grad():
@@ -156,11 +159,19 @@ class ModelRun(submitit.helpers.Checkpointable):
                 train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
                 train_targets,_,_ = standardize(train_targets)
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
+
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
+                    is_test = True
+                    if label == 'train':
+                        is_test = False
+                    
                     X, y = zip(*d)
                     X = torch.stack(X).to(device)
                     y = torch.stack(y).to(device)
                     X_embedded, y_embedded = model.forward(X, y)
+
+                    save_embeddings(X_embedded, "mat", cfg, is_test, run)
+                    save_embeddings(y_embedded, "target", cfg, is_test, run)
                                         
                     if label == 'test' and train_ratio == 1.0:
                         np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
@@ -177,6 +188,9 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
                     X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
                     y_pred = model.decode_targets(X_emb_reduced)
+
+                    save_embeddings(y_embedded, "joint", cfg, is_test, run)
+
                     if label == 'test':
                         epsilon = 1e-8
                         mape =  100 * torch.mean(torch.abs((y - y_pred)) / torch.abs((y + epsilon))).item()
@@ -202,6 +216,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         if path:
             self.save(path)
         
+        print(f"Run results: {self.results}")
         return self.results
 
     def checkpoint(self, *args, **kwargs):
@@ -277,8 +292,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     loss_terms = []
     validation = []
     autoencoder_features = []
-    
-    torch.cuda.empty_cache()
+
     gc.collect()
     
     wandb.init(project=cfg.project,
@@ -360,10 +374,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     
                 if cfg.log_gradients:
                     for name, param in model.named_parameters():
-                        wandb.log({
-                            "Epoch": epoch,
-                            f"Gradient Norm/{name}": param.grad.norm().item()
-                            })  
+                        if param.grad is not None:
+                            wandb.log({
+                                "Epoch": epoch,
+                                f"Gradient Norm/{name}": param.grad.norm().item()
+                                })  
 
                 optimizer.step()
 
@@ -444,7 +459,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     return loss_terms, model
 
 @hydra.main(config_path=".", config_name="main_model_config")
-
 def main(cfg: DictConfig):
 
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
@@ -473,8 +487,7 @@ def main(cfg: DictConfig):
             slurm_partition="gpu_short",
             gpus_per_node=1,
             tasks_per_node=1,
-            nodes=1,
-            cpus_per_task=30
+            nodes=1
             #slurm_constraint="v100-32g",
         )
         run_jobs = []
