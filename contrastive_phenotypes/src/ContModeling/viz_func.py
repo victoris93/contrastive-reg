@@ -188,7 +188,7 @@ def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, m
     corr_mat_pred = compute_batch_elementwise_correlation(true_mat, recon_mat)
     
     mean_corr = corr_mat_pred.mean()
-    mean_mape = mape_mat.mean()
+    median_mape = np.median(mape_mat)
     
     np.fill_diagonal(corr_mat_pred, 1.0)
 
@@ -201,7 +201,7 @@ def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, m
 
     plt.text(-12, 0.02, f'mean_corr = {mean_corr:.2f}', color='black', ha='right', va='bottom', fontsize=12, transform=plt.gca().transAxes,
             bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-    plt.text(-10.5, 0.09, f'mean_mape = {mean_mape:.2f}', color='black', ha='right', va='bottom', fontsize=12, transform=plt.gca().transAxes,
+    plt.text(-10.5, 0.09, f'median_mape = {median_mape:.2f}', color='black', ha='right', va='bottom', fontsize=12, transform=plt.gca().transAxes,
             bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
     plt.tight_layout()
     plt.savefig(fig_path)
