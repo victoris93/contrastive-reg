@@ -13,10 +13,11 @@ from pathlib import Path
 from scipy.stats import pearsonr, spearmanr
 
 
-def save_embeddings(embedding, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
+def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
     embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
     os.makedirs(embedding_dir, exist_ok=True)
     embedding_numpy = embedding.cpu().detach().numpy()
+    emb_type = emb_type + '_' # either "mat", "target" or "joint"
 
     if batch is None:
         batch_suffix = ''
@@ -43,7 +44,7 @@ def save_embeddings(embedding, cfg, test = False, run = None, batch = None, fold
     else:
         epoch_suffix = f"_epoch{epoch}"
 
-    save_path = f"{embedding_dir}/embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{run_suffix}{dataset_suffix}.npy"
+    save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{run_suffix}{dataset_suffix}.npy"
     np.save(save_path, embedding_numpy)
 
 def mean_correlations_between_subjects(y_true, y_pred):
