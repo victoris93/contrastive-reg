@@ -123,7 +123,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
-                    save_embeddings(embedded_feat, cfg = cfg, fold = fold, epoch = epoch)
+                    save_embeddings(embedded_feat, "mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
                     reconstructed_feat = model.decode_feat(embedded_feat)
                     
                     val_loss += criterion(features, reconstructed_feat)
