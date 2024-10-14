@@ -22,13 +22,14 @@ test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
     - "Philips Medical Systems_Ingenia"
+
 # enhancements
 ReEig: False
-skip_enc1: True
+skip_enc1: False
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 60
+output_dim_feat: 70
 input_type: "matrices" # Options: matrices, targets
 
 # Loss function and optimizer
@@ -44,7 +45,7 @@ targets:
 
 # Directory for saving results
 work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
-embedding_dir : recon_mat
+embedding_dir : embeddings
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
 output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
