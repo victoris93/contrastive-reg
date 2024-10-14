@@ -52,6 +52,8 @@ def main(cfg: DictConfig):
     os.makedirs(recon_mat_dir, exist_ok=True)
     model_params_dir = os.path.join(results_dir, cfg.model_weight_dir)
     os.makedirs(model_params_dir, exist_ok=True)
+    embedding_dir = os.path.join(results_dir, cfg.embedding_dir)
+    os.makedirs(embedding_dir, exist_ok=True)
     
     random_state = np.random.RandomState(seed=cfg.seed)
     
