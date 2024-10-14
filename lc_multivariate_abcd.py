@@ -106,7 +106,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
             test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
-            test_targets = (test_targets-mean)/std
+            std_test_targets = (test_targets-mean)/std
 
             ### Augmentation
             if augmentations != 'None':
@@ -157,7 +157,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                 train_dataset = Subset(dataset, train_indices)
                 train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
                 train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-                train_targets,_,_ = standardize(train_targets)
+                std_train_targets,_,_ = standardize(train_targets)
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
 
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
@@ -169,9 +169,6 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X = torch.stack(X).to(device)
                     y = torch.stack(y).to(device)
                     X_embedded, y_embedded = model.forward(X, y)
-
-                    save_embeddings(X_embedded, "mat", cfg, is_test, run)
-                    save_embeddings(y_embedded, "target", cfg, is_test, run)
                                         
                     if label == 'test' and train_ratio == 1.0:
                         np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
@@ -183,14 +180,16 @@ class ModelRun(submitit.helpers.Checkpointable):
 
                         np.save(f'{recon_mat_dir}/recon_mat_run{run}', recon_mat.cpu().numpy())
                         np.save(f'{recon_mat_dir}/mape_mat_run{run}', mape_mat.cpu().numpy())
-                        
+
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
                     X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
                     y_pred = model.decode_targets(X_emb_reduced)
 
-                    save_embeddings(y_embedded, "joint", cfg, is_test, run)
-
+                    save_embeddings(X_embedded, "mat", cfg, is_test, run)
+                    save_embeddings(X_emb_reduced, "joint", cfg, is_test, run)
+                    save_embeddings(y_embedded, "target", cfg, is_test, run)
+                    
                     if label == 'test':
                         epsilon = 1e-8
                         mape =  100 * torch.mean(torch.abs((y - y_pred)) / torch.abs((y + epsilon))).item()
