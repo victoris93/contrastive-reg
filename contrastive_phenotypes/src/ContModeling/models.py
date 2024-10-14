@@ -93,20 +93,20 @@ class MatAutoEncoder(nn.Module):
         # ENCODE MATRICES
         self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat ,bias=False)
         self.enc_mat2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat, bias=False)
-        self.enc_mat2.weight = torch.nn.Parameter(self.enc_mat1.weight)
+        self.enc_mat2.weight = torch.nn.Parameter(self.enc_mat1.weight) # Here weights are B_init_MRI.T
         
         # DECODE MATRICES
         self.dec_mat1 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat, bias=False)
         self.dec_mat2 = nn.Linear(in_features=output_dim_feat, out_features=input_dim_feat, bias=False)
-        self.dec_mat1.weight = torch.nn.Parameter(self.enc_mat1.weight.transpose(0,1))
-        self.dec_mat2.weight = torch.nn.Parameter(self.dec_mat1.weight)
+        self.dec_mat1.weight = torch.nn.Parameter(self.enc_mat1.weight.transpose(0,1)) # Here weights are B_init_MRI
+        self.dec_mat2.weight = torch.nn.Parameter(self.dec_mat1.weight) # Here weights are B_init_MRI
         self.dropout = nn.Dropout(p=dropout_rate)
         
     def encode_feat(self, x):
         rect = self.cfg.ReEig
         z_n = self.enc_mat1(x)
         self.skip_enc_mat1 = z_n.detach().clone()
-        c_hidd_fMRI = self.enc_mat2(z_n.transpose(1,2))
+        c_hidd_fMRI = self.enc_mat2(z_n.permute(0, 2, 1))
 
         if rect:
             reig = ReEig()
@@ -116,7 +116,7 @@ class MatAutoEncoder(nn.Module):
     
     def decode_feat(self,c_hidd_mat):
         skip_enc1 = self.cfg.skip_enc1
-        z_n = self.dec_mat1(c_hidd_mat).transpose(1,2)
+        z_n = self.dec_mat1(c_hidd_mat).permute(0, 2, 1)
 
         if skip_enc1: # long skip conn
             z_n += self.skip_enc_mat1
