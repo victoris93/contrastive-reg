@@ -72,6 +72,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             autoencoder_features = {}
             losses = []
             self.embeddings = {'train': [], 'test': []}
+            self.run = run
 
             if cfg.mat_ae_pretrained:
                 print("Loading test indices from the pretraining experiment...")
@@ -211,20 +212,12 @@ class ModelRun(submitit.helpers.Checkpointable):
             wandb.finish()        
             self.results = (losses, predictions, self.embeddings)
             
-        if path:
-            self.save(path)
-        
-        print(f"Run results: {self.results}")
         return self.results
 
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
-
-    def save(self, path: Path):
-        with open(path, "wb") as o:
-            pickle.dump(self.results, o, pickle.HIGHEST_PROTOCOL)
-
+        
 def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
     print("Start training...")
 
@@ -322,7 +315,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
                 reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
-                
+
                  ## TARGET DECODING FROM TARGET EMBEDDING
                 out_target = model.encode_targets(targets)
                 out_target_decoded = model.decode_targets(out_target)          

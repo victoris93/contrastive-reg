@@ -1,16 +1,16 @@
 project: "PhenProj | MatAE Pretrained"
-experiment_name: "main_model_cog"
+experiment_name: "main_model"
 hypothesis: "-"
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 60
-hidden_dim: 1000
+output_dim_feat: 70
+hidden_dim: 100
 input_dim_target: 1
-output_dim_target: 2
+output_dim_target: 3
 
 # MatAutoencoder options
-skip_enc1: True
+skip_enc1: False
 ReEig: False
 
 # Pretrained models options
@@ -27,7 +27,7 @@ num_epochs: 100
 batch_size: 64
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001
-weight_decay: 0.001
+weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio: 0.3 # makes no difference if some part of the model is pretrained
@@ -61,12 +61,14 @@ joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
 target_decoding_crit: MSE  # Options: Norm, MSE
 target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
 
+# Data
 augmentation: None
 mat_threshold: 0
 # Paths for data
 dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
 targets:
     - nihtbx_totalcomp_agecorrected
+standardize_targets: False
 
 # Directory for saving results
 work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
