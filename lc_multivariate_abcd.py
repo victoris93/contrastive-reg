@@ -55,7 +55,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         self.results = None
         self.embeddings = None
 
-    def __call__(self, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=None, device=None, path: Path = None):
+    def __call__(self, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -188,7 +188,6 @@ class ModelRun(submitit.helpers.Checkpointable):
 
                     save_embeddings(X_embedded, "mat", cfg, is_test, run)
                     save_embeddings(X_emb_reduced, "joint", cfg, is_test, run)
-                    save_embeddings(y_embedded, "target", cfg, is_test, run)
 
                     if label == 'test':
                         epsilon = 1e-8
@@ -209,9 +208,15 @@ class ModelRun(submitit.helpers.Checkpointable):
                             'target_embedded': y_embedded[i].cpu().numpy(),
                             'feature_embedded': X_emb_reduced[i].cpu().numpy()
                         })
-            wandb.finish()        
-            self.results = (losses, predictions, self.embeddings)
+            wandb.finish()
             
+            self.results = (losses, predictions, self.embeddings)
+
+        if save_model:
+            saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
+            os.makedirs(saved_models_dir, exist_ok=True)
+            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_run{run}.pth")
+
         return self.results
 
     def checkpoint(self, *args, **kwargs):
@@ -268,14 +273,9 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     criterion_pft = KernelizedSupCon(
         method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
     )
-    criterion_ptt = KernelizedSupCon(
-        method="expw", temperature=cfg.ptt_temperature, base_temperature=cfg.ptt_base_temperature, kernel=kernel, krnl_sigma=cfg.ptt_sigma
-    )
     
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
-    joint_embedding_crit = EMB_LOSSES[cfg.joint_embedding_crit]
     target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
-    target_decoding_from_reduced_emb_crit = EMB_LOSSES[cfg.target_decoding_from_reduced_emb_crit]
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
@@ -316,46 +316,21 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
                 reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
 
-                 ## TARGET DECODING FROM TARGET EMBEDDING
-                out_target = model.encode_targets(targets)
-                out_target_decoded = model.decode_targets(out_target)          
+                ## TARGET DECODING FROM MAT EMBEDDING
+                out_target_decoded = model.decode_targets(reduced_feat_embedding)
 
-
-                if not cfg.target_ae_pretrained:
-                    ## TARGET DECODING LOSS; computed if target autoencoder is not pretrained
-                    target_decoding_loss = target_decoding_crit(targets, out_target_decoded) 
-
-                if cfg.joint_embedding_crit == 'cosine':
-                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
-                                                                      out_target,
-                                                                      torch.ones(out_target.shape[0]).to(device)
-                                                                      )
-                else:
-                    joint_embedding_loss = 100 * joint_embedding_crit(reduced_feat_embedding,
-                                                                      out_target
-                                                                      )
-                
-                kernel_embedded_feature_loss = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)     
-
-                ## KERNLIZED LOSS: target embedding vs targets
-                kernel_embedded_target_loss = criterion_ptt(out_target.unsqueeze(1), targets)
+                ## KERNLIZED LOSS: MAT embedding vs targets
+                kernel_embedded_feature_loss = 10 * criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
                 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_loss = 100*target_decoding_crit(targets, out_target_decoded)
+                target_decoding_from_reduced_emb_loss = 100*target_decoding_crit(targets, out_target_decoded)
 
-                ## TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
-                target_decoded_from_reduced_emb = model.decode_targets(reduced_feat_embedding)
-
-                ## LOSS: TARGET DECODING FROM THE REDUCED FEATURE EMBEDDING
-                target_decoding_from_reduced_emb_loss = 100*target_decoding_from_reduced_emb_crit(targets, target_decoded_from_reduced_emb)
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + kernel_embedded_target_loss + joint_embedding_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
 
                 if not cfg.mat_ae_pretrained:
                     loss += feature_autoencoder_loss
-                if not cfg.target_ae_pretrained:
-                    loss += target_decoding_loss
 
                 loss.backward()
 
@@ -374,8 +349,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 loss_terms_batch['loss'] = loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(train_loader)
-                loss_terms_batch['joint_embedding_loss'] = joint_embedding_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
                 
                 if not cfg.mat_ae_pretrained:
@@ -384,20 +357,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                         'Epoch': epoch,
                         'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
                     })
-                if not cfg.target_ae_pretrained:
-                    loss_terms_batch['target_decoding_loss'] = target_decoding_loss.item() / len(train_loader)
-                    wandb.log({
-                        'Epoch': epoch,
-                        'target_decoding_loss': loss_terms_batch['target_decoding_loss']
-                    })
                 
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
-                    'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
-                    'joint_embedding_loss': loss_terms_batch['joint_embedding_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 
@@ -554,20 +519,6 @@ def main(cfg: DictConfig):
     df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
     df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
     df.to_csv(f"{results_dir}/mape.csv", index = False)
-
-    embedding_data = []
-    for run_embedding in embeddings:
-        for key, values in run_embedding.items():
-            for value in values:
-                embedding_data.append({
-                    'dataset': key,
-                    'index': value['index'],
-                    'target_embedded': value['target_embedded'],
-                    'feature_embedded': value['feature_embedded']
-                })
-
-    embedding_df = pd.DataFrame(embedding_data)
-    embedding_df.to_csv(f"{results_dir}/embeddings.csv", index=False)
 
 if __name__ == "__main__":
     main()
