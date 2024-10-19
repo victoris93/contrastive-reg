@@ -271,7 +271,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         model.target_ae.load_state_dict(state_dict)
 
     criterion_pft = KernelizedSupCon(
-        method="expw", temperature=cfg.pft_temperature, base_temperature= cfg.pft_base_temperature, kernel=kernel, krnl_sigma=cfg.pft_sigma
+        method="expw",
+        temperature=cfg.pft_temperature,
+        base_temperature= cfg.pft_base_temperature,
+        reg_term = cfg.reg_term,
+        kernel=kernel,
+        krnl_sigma=cfg.pft_sigma
     )
     
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]

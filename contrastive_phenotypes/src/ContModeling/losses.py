@@ -15,6 +15,7 @@ class KernelizedSupCon(nn.Module):
         temperature: float = 0.07,
         contrast_mode: str = "all",
         base_temperature: float = 0.07,
+        reg_term: float = 1.0,
         krnl_sigma: float = 1.0,
         kernel: callable = None,
         delta_reduction: str = "sum",
@@ -23,6 +24,7 @@ class KernelizedSupCon(nn.Module):
         self.temperature = temperature
         self.contrast_mode = contrast_mode
         self.base_temperature = base_temperature
+        self.reg_term = reg_term
         self.method = method
         self.kernel = kernel
         self.krnl_sigma = krnl_sigma
@@ -45,6 +47,14 @@ class KernelizedSupCon(nn.Module):
             f"kernel={self.kernel is not None}, "
             f"delta_reduction={self.delta_reduction})"
         )
+    
+    def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
+        cos_sim = nn.CosineSimilarity(2)
+        features_size = features.size()
+        features_expanded = features.expand(features_size[0], features_size[0], features_size[1])
+        similarity = cos_sim(features_expanded, features_expanded)
+        direction_reg = self.reg_term * similarity
+        return direction_reg
 
     def forward(self, features, labels=None):
         """Compute loss for model. If `labels` is None,
@@ -147,17 +157,19 @@ class KernelizedSupCon(nn.Module):
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
         positive_mask = mask * inv_diagonal
+        direction_reg = (self.direction_reg(features) * inv_diagonal - positive_mask).sum(1)
+
 
         log_prob = (
-            alignment - uniformity
+            alignment - uniformity # this is not in the formula
         )  # log(alignment/uniformity) = log(alignment) - log(uniformity)
         log_prob = (positive_mask * log_prob).sum(1) / positive_mask.sum(
             1
         )  # compute mean of log-likelihood over positive
 
         # loss
-        loss = -(self.temperature / self.base_temperature) * log_prob
-        return loss.mean()
+        loss = -(self.temperature / self.base_temperature) * log_prob + direction_reg
+        return loss.mean(), positive_mask, mask, inv_diagonal, log_prob, direction_reg
 
 
 class LogEuclideanLoss(nn.Module):
