@@ -157,7 +157,7 @@ class KernelizedSupCon(nn.Module):
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
         positive_mask = mask * inv_diagonal
-        direction_reg = (self.direction_reg(features) * inv_diagonal - positive_mask).sum(1)
+        direction_reg = torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
 
 
         log_prob = (
@@ -169,7 +169,8 @@ class KernelizedSupCon(nn.Module):
 
         # loss
         loss = -(self.temperature / self.base_temperature) * log_prob + direction_reg
-        return loss.mean(), positive_mask, mask, inv_diagonal, log_prob, direction_reg
+
+        return loss.mean(), direction_reg.mean()
 
 
 class LogEuclideanLoss(nn.Module):

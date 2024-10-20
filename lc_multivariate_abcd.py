@@ -26,6 +26,8 @@ from tqdm.auto import tqdm
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
+from sklearn.preprocessing import MinMaxScaler
+
 from ContModeling.utils import gaussian_kernel, cauchy, multivariate_cauchy, standardize, save_embeddings
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from ContModeling.models import PhenoProj
@@ -95,7 +97,9 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-            train_targets, mean, std= standardize(train_targets)
+            std_train_targets, mean, std= standardize(train_targets)
+            # scaler = MinMaxScaler().fit(train_targets)
+            # train_targets = scaler.transform(train_targets)
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
@@ -106,7 +110,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
             test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
-            std_test_targets = (test_targets-mean)/std
+            # test_targets = scaler.transform(test_targets)
 
             ### Augmentation
             if augmentations != 'None':
@@ -157,8 +161,8 @@ class ModelRun(submitit.helpers.Checkpointable):
                 train_dataset = Subset(dataset, train_indices)
                 train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
                 train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-                std_train_targets,_,_ = standardize(train_targets)
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
+                std_train_targets,_,_ = standardize(train_targets)
 
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     is_test = True
@@ -325,14 +329,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 out_target_decoded = model.decode_targets(reduced_feat_embedding)
 
                 ## KERNLIZED LOSS: MAT embedding vs targets
-                kernel_embedded_feature_loss = 10 * criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
-                
+                kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
+
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_from_reduced_emb_loss = 100*target_decoding_crit(targets, out_target_decoded)
+                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
 
 
                 ## SUM ALL LOSSES
                 loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
                     loss += feature_autoencoder_loss
@@ -355,6 +360,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss_terms_batch['loss'] = loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
+                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(train_loader)
                 
                 if not cfg.mat_ae_pretrained:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
@@ -368,6 +374,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
+                    'direction_reg_loss': loss_terms_batch['direction_reg_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 

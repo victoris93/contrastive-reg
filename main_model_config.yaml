@@ -49,10 +49,11 @@ SupCon_kernel: cauchy
 pft_base_temperature: 0.01
 pft_temperature: 0.01
 pft_sigma: 1
+reg_term: 0.01
 
 ## target proj vs. targets
-ptt_base_temperature: 0.07
-ptt_temperature: 0.07
+ptt_base_temperature: 0.005
+ptt_temperature: 0.005
 ptt_sigma: 1
 
 # Other losses
