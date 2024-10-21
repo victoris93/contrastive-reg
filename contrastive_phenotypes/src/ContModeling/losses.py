@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from .utils import multivariate_cauchy
 
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
@@ -49,11 +50,8 @@ class KernelizedSupCon(nn.Module):
         )
     
     def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
-        cos_sim = nn.CosineSimilarity(2)
-        features_size = features.size()
-        features_expanded = features.expand(features_size[0], features_size[0], features_size[1])
-        similarity = cos_sim(features_expanded, features_expanded)
-        direction_reg = self.reg_term * similarity
+        feat_mask = multivariate_cauchy(features, krnl_sigma=self.krnl_sigma)
+        direction_reg = self.reg_term * feat_mask
         return direction_reg
 
     def forward(self, features, labels=None):

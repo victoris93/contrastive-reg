@@ -332,11 +332,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
+                target_decoding_from_reduced_emb_loss = 1/10 * target_decoding_crit(targets, out_target_decoded)
 
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                loss = 10 * kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
                 # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
@@ -360,7 +360,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss_terms_batch['loss'] = loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(train_loader)
+                loss_terms_batch['direction_reg_loss'] = 10 * direction_reg.item() / len(train_loader)
                 
                 if not cfg.mat_ae_pretrained:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
