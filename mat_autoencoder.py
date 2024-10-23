@@ -59,7 +59,8 @@ def main(cfg: DictConfig):
     
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
-    dataset = MatData(dataset_path, targets, threshold=0)
+    synth_exp = cfg.synth_exp
+    dataset = MatData(dataset_path, targets, synth_exp, threshold=0)
     indices = np.arange(len(dataset))
 
     if cfg.external_test_mode: # deserves a separate function in the long run

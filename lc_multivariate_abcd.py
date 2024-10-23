@@ -28,7 +28,7 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from sklearn.preprocessing import MinMaxScaler
 
-from ContModeling.utils import gaussian_kernel, cauchy, multivariate_cauchy, standardize, save_embeddings
+from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
@@ -46,10 +46,10 @@ EMB_LOSSES ={
 }
 
 SUPCON_KERNELS = {
-    'multivariate_cauchy': multivariate_cauchy,
     'cauchy': cauchy,
-    'gaussian_kernel': gaussian_kernel
-}
+    'gaussian_kernel': gaussian_kernel,
+    'None': None
+    }
 
 
 class ModelRun(submitit.helpers.Checkpointable):
@@ -280,7 +280,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         base_temperature= cfg.pft_base_temperature,
         reg_term = cfg.reg_term,
         kernel=kernel,
-        krnl_sigma=cfg.pft_sigma
+        krnl_sigma_univar=cfg.pft_sigma_univar,
+        krnl_sigma_multivar=cfg.pft_sigma_multivar,
     )
     
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
@@ -330,13 +331,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 ## KERNLIZED LOSS: MAT embedding vs targets
                 kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
+                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
+                direction_reg = 100 * direction_reg
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
-                target_decoding_from_reduced_emb_loss = 1/10 * target_decoding_crit(targets, out_target_decoded)
+                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded) / 100
 
 
                 ## SUM ALL LOSSES
-                loss = 10 * kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
                 # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
@@ -360,7 +363,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss_terms_batch['loss'] = loss.item() / len(train_loader)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-                loss_terms_batch['direction_reg_loss'] = 10 * direction_reg.item() / len(train_loader)
+                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(train_loader)
                 
                 if not cfg.mat_ae_pretrained:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
@@ -435,7 +438,7 @@ def main(cfg: DictConfig):
     targets = list(cfg.targets)
     test_ratio = cfg.test_ratio
 
-    dataset = MatData(dataset_path, targets, threshold=cfg.mat_threshold)
+    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
