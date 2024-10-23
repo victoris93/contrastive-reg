@@ -150,15 +150,19 @@ def standardize_dataset(dataset):
     return standardized_dataset
 
 def gaussian_kernel(x, krnl_sigma):
-    x = x - x.T
+    if x.shape[-1] > 1:
+        x = torch.cdist(x, x)
+    else:
+        x = x - x.T
     return torch.exp(-(x**2) / (2 * (krnl_sigma**2))) / (
         math.sqrt(2 * torch.pi) * krnl_sigma
     )
 
 def cauchy(x, krnl_sigma):
-    x = x - x.T
+    if x.shape[-1] > 1:
+        x = torch.cdist(x, x)
+    else:
+        x = x - x.T
     return 1.0 / (krnl_sigma * (x**2) + 1)
 
-def multivariate_cauchy(x, krnl_sigma):
-    x = torch.cdist(x, x)
-    return 1.0 / (krnl_sigma * (x**2) + 1)
+
