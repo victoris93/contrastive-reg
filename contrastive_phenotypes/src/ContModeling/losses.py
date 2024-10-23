@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from .utils import multivariate_cauchy
+from sklearn.preprocessing import MinMaxScaler
 
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
@@ -17,7 +17,8 @@ class KernelizedSupCon(nn.Module):
         contrast_mode: str = "all",
         base_temperature: float = 0.07,
         reg_term: float = 1.0,
-        krnl_sigma: float = 1.0,
+        krnl_sigma_univar: float = 1.0,
+        krnl_sigma_multivar: float = 1.0,
         kernel: callable = None,
         delta_reduction: str = "sum",
     ):
@@ -28,14 +29,12 @@ class KernelizedSupCon(nn.Module):
         self.reg_term = reg_term
         self.method = method
         self.kernel = kernel
-        self.krnl_sigma = krnl_sigma
+        self.krnl_sigma_univar = krnl_sigma_univar
+        self.krnl_sigma_multivar = krnl_sigma_multivar
         self.delta_reduction = delta_reduction
 
         if kernel is not None and method == "supcon":
             raise ValueError("Kernel must be none if method=supcon")
-
-        if kernel is None and method != "supcon":
-            raise ValueError("Kernel must not be none if method != supcon")
 
         if delta_reduction not in ["mean", "sum"]:
             raise ValueError(f"Invalid reduction {delta_reduction}")
@@ -50,8 +49,8 @@ class KernelizedSupCon(nn.Module):
         )
     
     def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
-        feat_mask = multivariate_cauchy(features, krnl_sigma=self.krnl_sigma)
-        direction_reg = self.reg_term * feat_mask
+        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma_multivar)
+        direction_reg = feat_mask
         return direction_reg
 
     def forward(self, features, labels=None):
@@ -86,9 +85,12 @@ class KernelizedSupCon(nn.Module):
             #    raise ValueError("Num of labels does not match num of features")
 
             if self.kernel is None:
-                mask = torch.eq(labels, labels.T)
+                scaler = MinMaxScaler()
+                mask = -torch.cdist(labels, labels)
+                mask = scaler.fit_transform(mask.cpu().numpy())
+                mask = torch.tensor(mask, device=device).to(torch.float64)
             else:
-                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma)
+                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma_univar)
 
         view_count = features.shape[1]
         features = torch.cat(torch.unbind(features, dim=1), dim=0)
@@ -155,7 +157,7 @@ class KernelizedSupCon(nn.Module):
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
         positive_mask = mask * inv_diagonal
-        direction_reg = torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
+        direction_reg = self.reg_term * torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
 
 
         log_prob = (
@@ -166,6 +168,7 @@ class KernelizedSupCon(nn.Module):
         )  # compute mean of log-likelihood over positive
 
         # loss
+
         loss = -(self.temperature / self.base_temperature) * log_prob + direction_reg
 
         return loss.mean(), direction_reg.mean()
