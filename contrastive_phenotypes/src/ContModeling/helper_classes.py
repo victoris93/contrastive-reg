@@ -79,6 +79,7 @@ class MatData(Dataset):
             self.matrices = self.threshold_mat()
 
         if synth_exp:
+            print("Simulating effect")
             self.matrices = self.simulate_effect(self.matrices, self.targets)
 
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
@@ -98,7 +99,7 @@ class MatData(Dataset):
         # standardize lables
         targets_std = (targets - 100) / 15 * 0.1
 
-        beta = 0.08
+        beta = 5
         effect = beta * targets_std
         effect_matrices = np.zeros_like(matrices)
 
