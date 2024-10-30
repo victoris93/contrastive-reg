@@ -1,5 +1,5 @@
 project: "PhenProj | MatAE Pretrained"
-experiment_name: "no_target_ae"
+experiment_name: "exp"
 hypothesis: "-"
 
 # Model dimensions
@@ -20,6 +20,7 @@ pretrained_mat_ae_exp: "external_mat_ae_abcd"
 pretrained_target_ae_exp: "target_ae"
 best_mat_ae_fold: 3
 best_target_ae_fold: 1
+synth_exp: False
 
 # Training parameters
 multi_gpu: True
@@ -46,9 +47,10 @@ test_scanners:
 SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 0.1
-pft_temperature: 0.1
-pft_sigma: 1
+pft_base_temperature: 0.07
+pft_temperature: 0.07
+pft_sigma_univar: 1.0
+pft_sigma_multivar: 1.0
 reg_term: 0.01
 
 ## target proj vs. targets
@@ -60,7 +62,7 @@ ptt_sigma: 1
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
 joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
 target_decoding_crit: MSE  # Options: Norm, MSE
-target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
+huber_delta: 10
 
 # Data
 augmentation: None

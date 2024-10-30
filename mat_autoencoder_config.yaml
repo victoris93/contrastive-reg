@@ -1,5 +1,5 @@
 project: "PretrainMatAE_ABCD"
-experiment_name: "external_mat_ae_abcd"
+experiment_name: "synth_external_mat_ae_abcd"
 
 hypothesis: "-"
 # Training parameters
@@ -15,6 +15,7 @@ test_size : 0.3
 seed : 42
 log_gradients: True
 clip_grad: True
+synth_exp: True
 
 # test options
 external_test_mode: True

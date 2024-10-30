@@ -42,6 +42,7 @@ EMB_LOSSES ={
     'Norm': NormLoss(),
     'LogEuclidean': LogEuclideanLoss(),
     'MSE': nn.functional.mse_loss,
+    'Huber': nn.HuberLoss(),
     'cosine': nn.functional.cosine_embedding_loss,
 }
 
@@ -335,6 +336,9 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 direction_reg = 100 * direction_reg
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
+                if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
+                    target_decoding_crit = nn.HuberLoss(delta = cfg.huber_delta)
+                
                 target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded) / 100
 
 
@@ -360,13 +364,13 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 optimizer.step()
 
-                loss_terms_batch['loss'] = loss.item() / len(train_loader)
-                loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(train_loader)
-                loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(train_loader)
-                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(train_loader)
+                loss_terms_batch['loss'] = loss.item() / len(features)
+                loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(features)
+                loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
+                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(features)
                 
                 if not cfg.mat_ae_pretrained:
-                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(train_loader)
+                    loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
                         'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
