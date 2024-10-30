@@ -1,56 +1,81 @@
-
-experiment_name: "main_model_loss_norm"
-hypothesis: "Contrastive learning with norm loss"
+project: "PhenProj | MatAE Pretrained"
+experiment_name: "exp"
+hypothesis: "-"
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 50
-hidden_dim_feat: 1000
-input_dim_target: 3
-output_dim_target: 2
+output_dim_feat: 70
+hidden_dim: 100
+input_dim_target: 1
+output_dim_target: 3
+
+# MatAutoencoder options
+skip_enc1: False
+ReEig: False
+
+# Pretrained models options
+mat_ae_pretrained: True
+target_ae_pretrained: False
+pretrained_mat_ae_exp: "external_mat_ae_abcd"
+pretrained_target_ae_exp: "target_ae"
+best_mat_ae_fold: 3
+best_target_ae_fold: 1
+synth_exp: False
 
 # Training parameters
 multi_gpu: True
 num_epochs: 100
-batch_size: 32
-experiments: 20
+batch_size: 64
+n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_ratio: 0.2
+test_ratio: 0.3 # makes no difference if some part of the model is pretrained
+train_ratio: 1.0
+log_gradients: True
+clip_grad: True
+
+# test options
+external_test_mode: True
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
 
 # Contrastive loss parameters
-SupCon_kernel: multivariate_cauchy
+SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 10
-pft_temperature: 10
-pft_sigma: 50
+pft_base_temperature: 0.07
+pft_temperature: 0.07
+pft_sigma_univar: 1.0
+pft_sigma_multivar: 1.0
+reg_term: 0.01
 
 ## target proj vs. targets
-ptt_base_temperature: 10
-ptt_temperature: 10
-ptt_sigma: 50
+ptt_base_temperature: 0.005
+ptt_temperature: 0.005
+ptt_sigma: 1
 
 # Other losses
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
 joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
 target_decoding_crit: MSE  # Options: Norm, MSE
-target_decoding_from_reduced_emb_crit: MSE # Options: Norm, MSE
+huber_delta: 10
 
+# Data
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
 targets:
-    - cbcl_scr_syn_thought_r
-    - cbcl_scr_syn_internal_r
-    - cbcl_scr_syn_external_r
+    - nihtbx_totalcomp_agecorrected
+standardize_targets: False
 
 # Directory for saving results
-working_dir: '/well/margulies/users/cpy397/contrastive-learning'
+work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
+embedding_dir : embeddings
 model_weight_dir : saved_models
-tensorboard_dir: tensorboard
-output_dir: '/well/margulies/users/cpy397/contrastive-learning/results'
+output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"

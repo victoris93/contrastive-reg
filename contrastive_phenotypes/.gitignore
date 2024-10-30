@@ -1,0 +1,7 @@
+ContModeling.egg-info
+.DS_Store
+src/ContModeling.egg-info
+src/ContModeling/.DS_Store
+src/.DS_Store
+src/ContModeling/__pycache__
+src/ContModeling/.ipynb_checkpoints
