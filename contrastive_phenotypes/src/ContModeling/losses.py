@@ -50,7 +50,7 @@ class KernelizedSupCon(nn.Module):
     
     def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
         feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma_multivar)
-        direction_reg = feat_mask
+        direction_reg = self.reg_term * feat_mask
         return direction_reg
 
     def forward(self, features, labels=None):
@@ -157,7 +157,7 @@ class KernelizedSupCon(nn.Module):
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
         positive_mask = mask * inv_diagonal
-        direction_reg = self.reg_term * torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
+        direction_reg =  torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
 
 
         log_prob = (
@@ -169,9 +169,9 @@ class KernelizedSupCon(nn.Module):
 
         # loss
 
-        loss = -(self.temperature / self.base_temperature) * log_prob + direction_reg
+        loss = -(self.temperature / self.base_temperature) * log_prob
 
-        return loss.mean(), direction_reg.mean()
+        return loss.mean() + direction_reg.mean(), direction_reg.mean()
 
 
 class LogEuclideanLoss(nn.Module):
