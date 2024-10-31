@@ -7,6 +7,8 @@
 module load Python/3.11.3-GCCcore-12.3.0
 source /well/margulies/users/cpy397/python/neuro/bin/activate
 echo the job id is $SLURM_JOB_ID
-
+var='pea_wiscv_trs'
 export HYDRA_FULL_ERROR=1
-python3 -u lc_multivariate_abcd.py
+python3 -u lc_multivariate_abcd.py \
+    experiment_name="${var}_ext_exp" \
+    targets=$var \
