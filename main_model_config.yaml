@@ -61,7 +61,7 @@ ptt_sigma: 1
 # Other losses
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
 joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
-target_decoding_crit: MSE  # Options: Norm, MSE
+target_decoding_crit: MSERobust  # Options: Norm, MSE
 huber_delta: 10
 
 # Data

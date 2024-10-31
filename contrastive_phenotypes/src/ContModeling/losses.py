@@ -174,6 +174,19 @@ class KernelizedSupCon(nn.Module):
         return loss.mean() + direction_reg.mean(), direction_reg.mean()
 
 
+class OutlierRobustMSE(nn.Module):
+    def __init__(self, lmbd = 0.5):
+        super(OutlierRobustMSE, self).__init__()
+        self.lmbd = lmbd
+
+    def forward(self, targets, pred):
+        targets_standardized = torch.abs((targets - 100) / 15)
+        base_mse = nn.functional.mse_loss(targets, pred)
+        penalty = torch.exp(1 + targets_standardized).sum() * (1 - 1/(torch.abs(targets-pred)/targets).sum())
+        mse_with_outlier_penalty = base_mse + penalty
+        return mse_with_outlier_penalty
+
+
 class LogEuclideanLoss(nn.Module):
     def __init__(self):
         super(LogEuclideanLoss, self).__init__()

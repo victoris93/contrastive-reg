@@ -29,7 +29,7 @@ import random
 from sklearn.preprocessing import MinMaxScaler
 
 from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
-from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
+from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
 from ContModeling.viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
@@ -42,6 +42,7 @@ EMB_LOSSES ={
     'Norm': NormLoss(),
     'LogEuclidean': LogEuclideanLoss(),
     'MSE': nn.functional.mse_loss,
+    'MSERobust': OutlierRobustMSE(),
     'Huber': nn.HuberLoss(),
     'cosine': nn.functional.cosine_embedding_loss,
 }
