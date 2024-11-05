@@ -83,7 +83,7 @@ class MatData(Dataset):
             self.matrices = self.simulate_effect(self.matrices, self.targets)
 
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-        self.target = torch.from_numpy(self.targets).to(torch.float32)
+        self.targets = torch.from_numpy(self.targets).to(torch.float32)
 
         gc.collect()
 
