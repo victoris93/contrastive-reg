@@ -98,7 +98,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             test_dataset = Subset(dataset, test_indices)
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
-            train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+            train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
             std_train_targets, mean, std= standardize(train_targets)
             # scaler = MinMaxScaler().fit(train_targets)
             # train_targets = scaler.transform(train_targets)
@@ -111,7 +111,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
-            test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
+            test_targets = test_dataset.dataset.targets[test_dataset.indices].numpy()
             # test_targets = scaler.transform(test_targets)
 
             ### Augmentation
@@ -162,7 +162,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             with torch.no_grad():
                 train_dataset = Subset(dataset, train_indices)
                 train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
-                train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+                train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
                 std_train_targets,_,_ = standardize(train_targets)
 
@@ -269,7 +269,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         model.matrix_ae.load_state_dict(state_dict)
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI)
+        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
     if cfg.target_ae_pretrained:
         print("Loading pretrained TargetAutoencoder...")
@@ -440,7 +440,12 @@ def main(cfg: DictConfig):
     random_state = np.random.RandomState(seed=42)
 
     dataset_path = cfg.dataset_path
-    targets = list(cfg.targets)
+
+    if isinstance(cfg.targets, str):
+        targets =[cfg.targets]
+    else:
+        targets = list(cfg.targets)
+        
     test_ratio = cfg.test_ratio
 
     dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
