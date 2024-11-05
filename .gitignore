@@ -12,3 +12,5 @@ conn_camcan_2/
 conn_camcan_without_nan/
 outputs/
 nifti_camcan/
+connectivity_matrices/
+nilearn_cache/
