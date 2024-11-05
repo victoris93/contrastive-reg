@@ -66,19 +66,24 @@ class FoldTrain(submitit.helpers.Checkpointable):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, threshold=0):
+    def __init__(self, dataset_path, target_names, synth_exp, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
         self.threshold = threshold
         self.data_array = xr.open_dataset(dataset_path)
-        #self.matrices = self.data_array.matrices.values.astype(np.float32)
-        self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
+        self.matrices = self.data_array.matrices.values.astype(np.float32)
+        self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
 
         if threshold > 0:
-            self.matrices = self.threshold_mat(self.matrices, self.threshold)
+            self.matrices = self.threshold_mat()
+
+        if synth_exp:
+            print("Simulating effect")
+            self.matrices = self.simulate_effect(self.matrices, self.targets)
+
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-        self.target = torch.from_numpy(np.array([self.data_array[target_name].values for target_name in self.target_names]).T).to(torch.float32)
+        self.target = torch.from_numpy(self.targets).to(torch.float32)
 
         gc.collect()
 
@@ -88,6 +93,24 @@ class MatData(Dataset):
         thresh_mat = matrices * mask
         return thresh_mat
     
+    def simulate_effect(self, matrices, targets):
+        # hypothesis: positive connectivity is stronger
+        # when IQ is higher
+        # standardize lables
+        targets_std = (targets - 100) / 15 * 0.1
+
+        beta = 5
+        effect = beta * targets_std
+        effect_matrices = np.zeros_like(matrices)
+
+        for idx, effect_matrix in enumerate(effect_matrices):
+            pos_conn_idx = np.where(matrices[idx] > 1)
+            effect_matrix[pos_conn_idx] = effect[idx]
+            effect_matrices[idx] = effect_matrix
+
+        sim_matrices = matrices + effect_matrices
+        return sim_matrices
+
     def __len__(self):
         return self.data_array.subject.__len__()
     
@@ -96,49 +119,3 @@ class MatData(Dataset):
         target = torch.from_numpy(np.array([self.data_array.isel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
         
         return matrix, target
-
-class MatData_age(Dataset):
-    def __init__(self, dataset_path, encode_target_names, decode_target_names, threshold=0):
-        if not isinstance(encode_target_names, list):
-            encode_target_names = [encode_target_names]
-        if not isinstance(decode_target_names, list):
-            decode_target_names = [decode_target_names]
-
-        self.encode_target_names = encode_target_names
-        self.decode_target_names = decode_target_names
-        self.threshold = threshold
-        self.data_array = xr.open_dataset(dataset_path)
-        self.matrices = self.data_array.to_array().squeeze().values.astype(np.float32)
-        if threshold > 0:
-            self.matrices = self.threshold_mat(self.matrices, self.threshold)
-        self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-        self.encode_target = self._load_targets(self.encode_target_names)
-        self.decode_target= self._load_targets(self.decode_target_names)
-
-        gc.collect()
-
-    def _load_targets(self, target_names):
-        try:
-            target_data = np.array([self.data_array[name].values for name in target_names]).T
-            target_data = target_data.astype(np.float32)
-            return torch.from_numpy(target_data).to(torch.float32)
-        except Exception as e:
-            print(f"Error processing targets: {e}")
-            raise
-
-    def threshold_mat(self, matrices, threshold):  # as in Margulies et al. (2016)
-        perc = np.percentile(np.abs(matrices), threshold, axis=2, keepdims=True)
-        mask = np.abs(matrices) >= perc
-        thresh_mat = matrices * mask
-        return thresh_mat
-
-    def __len__(self):
-        return len(self.data_array.subject)
-
-    def __getitem__(self, idx):
-        matrix = self.matrices[idx]
-        encode_target = self.encode_target[idx]
-        decode_target = self.decode_target[idx]
-
-
-        return matrix, encode_target, decode_target

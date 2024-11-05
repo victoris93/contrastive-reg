@@ -1,43 +1,35 @@
-# Standard library imports
+# +
+import wandb
 import math
-import sys
+import xarray as xr
+import asyncio
+import submitit
 import pickle
-import glob
-import os
-import shutil
-import random
+import sys
+import hydra
+from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
+# import matplotlib.pyplot as plt
+import numpy as np
+# import seaborn as sns
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
+from tqdm.auto import tqdm
+import glob, os, shutil
+import random
+from torch.utils.tensorboard import SummaryWriter
+import sys
 
-# Third-party library imports
-try:
-    import wandb
-    import xarray as xr
-    import asyncio
-    import submitit
-    import hydra
-    from omegaconf import DictConfig, OmegaConf
-    import numpy as np
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
-    from torch.utils.tensorboard import SummaryWriter
-    from tqdm.auto import tqdm
-    print("All third-party imports successful")
-except ImportError as e:
-    print(f"Import error in third-party libraries: {e}")
+from .viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
+from .utils import mean_correlations_between_subjects, mape_between_subjects
+from .losses import LogEuclideanLoss, NormLoss
+from .models import AutoEncoder
+from .helper_classes import MatData
 
-# Local imports
-try:
-    from .viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
-    from .utils import mean_correlations_between_subjects, mape_between_subjects
-    from .losses import LogEuclideanLoss, NormLoss
-    from .models import AutoEncoder
-    from .helper_classes import MatData
-    print("All local imports successful")
-except ImportError as e:
-    print(f"Import error in local modules: {e}")
 
+# -
 
 def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
     
@@ -45,7 +37,7 @@ def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_d
         group = "ae_test",
         mode = "offline",
         name=cfg.experiment_name,
-        dir = cfg.output_dir)
+       dir = cfg.output_dir)
     wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
@@ -70,6 +62,7 @@ def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_d
     test_mean_corr = 0
     test_mape = 0
     
+
     if cfg.loss_function == 'LogEuclidean':
             criterion = LogEuclideanLoss()
     elif cfg.loss_function == 'Norm':
@@ -102,7 +95,8 @@ def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_d
     wandb_plot_acc_vs_baseline(wandb, cfg.dataset_path, cfg.work_dir, cfg.experiment_name, 'ae_loss_norm')
     
     wandb.finish()
-    
+
+            
     test_loss /= len(test_loader)
     test_mean_corr /= len(test_loader)
     test_mape /= len(test_loader)

@@ -38,13 +38,11 @@ from .helper_classes import MatData
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, device, model=None):
 
-    run = wandb.init(
-        project=cfg.project,
-        name=f"{cfg.experiment_name}_fold_{fold}",
-        config=OmegaConf.to_container(cfg, resolve=True),
-        reinit=True  # Allows multiple wandb.init() calls in different processes
-    )
-    #wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+    wandb.init(project=cfg.project,
+       mode = "offline",
+       name=cfg.experiment_name,
+       dir = cfg.output_dir)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
     
     input_dim_feat = cfg.input_dim_feat
     output_dim_feat = cfg.output_dim_feat
@@ -83,8 +81,6 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                                                      patience = cfg.scheduler_patience)
     
     loss_terms = []
-    best_val_loss = float('inf')
-    previous_best_fold = None
         
     model.train()
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
@@ -127,7 +123,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
-                    save_embeddings(embedded_feat, cfg = cfg, fold = fold, epoch = epoch)
+                    save_embeddings(embedded_feat, "mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
                     reconstructed_feat = model.decode_feat(embedded_feat)
                     
                     val_loss += criterion(features, reconstructed_feat)
@@ -137,7 +133,6 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
             val_mape /= len(val_loader)
-            
             
             wandb.log({
                 "Fold" : fold,
@@ -149,22 +144,12 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             
             loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
             
-            if val_loss < best_val_loss:
-                # Remove the previous best fold tag if it exists
-                if previous_best_fold is not None:
-                    run.tags = [tag for tag in run.tags if tag != "best_fold"]  # Remove the tag for the previous best fold
-                
-                run.tags = ["best_fold"]  # Set the tag for the current best fold
-                best_val_loss = val_loss
-                previous_best_fold = fold
-                
             scheduler.step(val_loss)
             if np.log10(scheduler._last_lr[0]) < -4:
                 break
 
             pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
             
-    
     wandb.finish()
     print(loss_terms)
     
@@ -288,12 +273,11 @@ def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, mode
 
 def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
     
-    wandb.init(
-        project=cfg.project,
-        name=f"{cfg.experiment_name}_fold_{best_fold}",
-        config=OmegaConf.to_container(cfg, resolve=True),
-        reinit=True  # Allows multiple wandb.init() calls in different processes
-    )
+    wandb.init(project=cfg.project,
+        mode = "offline",
+        name=f"TEST_{cfg.experiment_name}",
+        dir = cfg.output_dir,
+        config = OmegaConf.to_container(cfg, resolve=True))
 
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
     input_dim_feat = cfg.input_dim_feat
@@ -352,14 +336,14 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
                 'Test | Loss': loss,
                 })
         
-        """ recon_mat = load_recon_mats(cfg.work_dir,cfg.experiment_name, False)
+        recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False)
         true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False)
         mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
         test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"
         test_idx = np.load(test_idx_path)
 
         wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat, true_mat, mape_mat)
-        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, test_idx, recon_mat, true_mat, mape_mat, 0) """
+        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, test_idx, recon_mat, true_mat, mape_mat, 0)
 
         
     wandb.finish()
@@ -369,7 +353,6 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
     test_mean_corr /= len(test_loader)
     test_mape /= len(test_loader)
     print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
-    return(test_loss)
 
 
 def test_target_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_targets_dir, device):

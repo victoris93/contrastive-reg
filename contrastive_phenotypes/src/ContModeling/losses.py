@@ -1,26 +1,10 @@
-import math
 from cmath import isinf
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+from sklearn.preprocessing import MinMaxScaler
 
-try:
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    print("All imports successful")
-except ImportError as e:
-    print(f"Import error: {e}")
-
-def gaussian_kernel(x, sigma):
-    x = x - x.T
-    return torch.exp(-(x**2) / (2*(sigma**2))) / (math.sqrt(sigma*torch.pi)*sigma)
-
-def rbf(x):
-        x = x - x.T
-        return torch.exp(-(x**2)/(2*(1**2)))
-
-def cauchy(x):
-        x = x - x.T
-        return  1. / (1*(x**2) + 1)
-    
 class KernelizedSupCon(nn.Module):
     """Supervised contrastive loss: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR
@@ -32,7 +16,9 @@ class KernelizedSupCon(nn.Module):
         temperature: float = 0.07,
         contrast_mode: str = "all",
         base_temperature: float = 0.07,
-        krnl_sigma: float = 1.0,
+        reg_term: float = 1.0,
+        krnl_sigma_univar: float = 1.0,
+        krnl_sigma_multivar: float = 1.0,
         kernel: callable = None,
         delta_reduction: str = "sum",
     ):
@@ -40,19 +26,19 @@ class KernelizedSupCon(nn.Module):
         self.temperature = temperature
         self.contrast_mode = contrast_mode
         self.base_temperature = base_temperature
+        self.reg_term = reg_term
         self.method = method
         self.kernel = kernel
-        self.krnl_sigma = krnl_sigma
+        self.krnl_sigma_univar = krnl_sigma_univar
+        self.krnl_sigma_multivar = krnl_sigma_multivar
         self.delta_reduction = delta_reduction
 
         if kernel is not None and method == "supcon":
             raise ValueError("Kernel must be none if method=supcon")
 
-        if kernel is None and method != "supcon":
-            raise ValueError("Kernel must not be none if method != supcon")
-
         if delta_reduction not in ["mean", "sum"]:
             raise ValueError(f"Invalid reduction {delta_reduction}")
+
     def __repr__(self):
         return (
             f"{self.__class__.__name__} "
@@ -61,6 +47,11 @@ class KernelizedSupCon(nn.Module):
             f"kernel={self.kernel is not None}, "
             f"delta_reduction={self.delta_reduction})"
         )
+    
+    def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
+        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma_multivar)
+        direction_reg = self.reg_term * feat_mask
+        return direction_reg
 
     def forward(self, features, labels=None):
         """Compute loss for model. If `labels` is None,
@@ -94,9 +85,12 @@ class KernelizedSupCon(nn.Module):
             #    raise ValueError("Num of labels does not match num of features")
 
             if self.kernel is None:
-                mask = torch.eq(labels, labels.T)
+                scaler = MinMaxScaler()
+                mask = -torch.cdist(labels, labels)
+                mask = scaler.fit_transform(mask.cpu().numpy())
+                mask = torch.tensor(mask, device=device).to(torch.float64)
             else:
-                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma)
+                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma_univar)
 
         view_count = features.shape[1]
         features = torch.cat(torch.unbind(features, dim=1), dim=0)
@@ -163,17 +157,34 @@ class KernelizedSupCon(nn.Module):
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
         positive_mask = mask * inv_diagonal
+        direction_reg =  torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
+
 
         log_prob = (
-            alignment - uniformity
+            alignment - uniformity # this is not in the formula
         )  # log(alignment/uniformity) = log(alignment) - log(uniformity)
         log_prob = (positive_mask * log_prob).sum(1) / positive_mask.sum(
             1
         )  # compute mean of log-likelihood over positive
 
         # loss
+
         loss = -(self.temperature / self.base_temperature) * log_prob
-        return loss.mean()
+
+        return loss.mean() + direction_reg.mean(), direction_reg.mean()
+
+
+class OutlierRobustMSE(nn.Module):
+    def __init__(self, lmbd = 0.5):
+        super(OutlierRobustMSE, self).__init__()
+        self.lmbd = lmbd
+
+    def forward(self, targets, pred):
+        targets_standardized = torch.abs((targets - 100) / 15)
+        base_mse = nn.functional.mse_loss(targets, pred)
+        penalty = torch.exp(1 + targets_standardized).sum() * (1 - 1/(torch.abs(targets-pred)/targets).sum())
+        mse_with_outlier_penalty = base_mse + penalty
+        return mse_with_outlier_penalty
 
 
 class LogEuclideanLoss(nn.Module):
