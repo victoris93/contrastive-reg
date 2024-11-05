@@ -1,0 +1,14 @@
+result/
+__pycache__/
+hydra/
+logs/
+log_folder/
+multirun/
+matrices/
+error/
+tensorboard/
+wandb/
+conn_camcan_2/
+conn_camcan_without_nan/
+outputs/
+nifti_camcan/
