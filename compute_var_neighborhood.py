@@ -5,7 +5,7 @@ import xarray as xr
 from tqdm import tqdm
 import sys
 
-root = "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+root = "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
 run = 0
 exp_name = sys.argv[1]
 dataset = sys.argv[2]
@@ -19,28 +19,28 @@ n_neighbors = int(sys.argv[3])
 
 neigh = NearestNeighbors(n_neighbors=n_neighbors, radius=1, algorithm='brute', metric = 'cosine', p = 2).fit(embeddings)
 distances, neighbors = neigh.kneighbors(embeddings, return_distance = True)
-data =  xr.open_dataset(f'{root}/ABCD/abcd_dataset_400parcels_1.nc')
-mean_mat = data.matrices.values.mean(axis = 0)
+data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels_1.nc')
 
 neigh_conn_var = []
 neigh_conn_dvar_ddist = []
 
 for neighborhood_idx, neighborhood in enumerate(tqdm(neighbors)):
+    var = 0
+    dist_neigh = distances[neighborhood_idx]
     neigh_idx = sub_idx[neighborhood]
-    matrices = data.matrices.isel(subject = neigh_idx).values
-    var = np.var(matrices, mean = mean_mat, axis = 0)
-    neigh_conn_var.append(var)
-    dvar_ddist = []
-    for mat_idx, mat in enumerate(matrices):
-        sub_dvar_ddist = np.zeros_like(matrices[0])
-        if mat_idx != 0:
-            centroid_var = np.var(matrices[0][None, :], mean = mean_mat, axis = 0)
-            neigh_var = np.var(mat[None, :], mean = mean_mat, axis = 0)
-            sub_dvar_ddist = np.abs(centroid_var - neigh_var)/distances[neighborhood_idx][mat_idx]
-        dvar_ddist.append(np.mean(sub_dvar_ddist))
-    neigh_conn_dvar_ddist.append(dvar_ddist)
-neigh_conn_var = np.array(neigh_conn_var)
-neigh_conn_dvar_ddist = np.array(neigh_conn_dvar_ddist)
+    neigh_matrices = data.matrices.isel(subject = neigh_idx).values
+    centroid = neigh_matrices[0]
 
+    for mat_idx, mat in enumerate(neigh_matrices):
+        if mat_idx == 0:
+            continue
+        var_shift = (centroid - mat) ** 2
+        var += var_shift
+        sub_dvar_ddist = var_shift / dist_neigh[mat_idx]
+        neigh_conn_dvar_ddist.append(sub_dvar_ddist)
+    
+    neigh_conn_var.append(var / len(neighborhood[1:]))
+    np.save(f"{exp_dir}/embeddings/neigh_conn_dvar_ddist_{dataset}_neigh_idx{neighborhood_idx}.npy", np.array(neigh_conn_dvar_ddist))
+
+neigh_conn_var = np.array(neigh_conn_var)
 np.save(f"{exp_dir}/embeddings/neigh_conn_var_{dataset}.npy", neigh_conn_var)
-np.save(f"{exp_dir}/embeddings/neigh_conn_dvar_ddist_mean_{dataset}.npy", neigh_conn_dvar_ddist)
