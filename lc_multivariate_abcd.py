@@ -457,15 +457,15 @@ def main(cfg: DictConfig):
     train_ratio = cfg.train_ratio
 
     if multi_gpu:
-        print("Using multi-gpu")
         log_folder = Path("logs")
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu_short",
-            gpus_per_node=1,
+            slurm_partition="prepost",
+            # gpus_per_node=1,
             tasks_per_node=1,
-            nodes=1
+            nodes=1,
+            cpus_per_task=30
             #slurm_constraint="v100-32g",
         )
         run_jobs = []
