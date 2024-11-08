@@ -280,10 +280,18 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         method="expw",
         temperature=cfg.pft_temperature,
         base_temperature= cfg.pft_base_temperature,
-        reg_term = cfg.reg_term,
+        reg_term = cfg.pft_reg_term,
         kernel=kernel,
-        krnl_sigma_univar=cfg.pft_sigma_univar,
-        krnl_sigma_multivar=cfg.pft_sigma_multivar,
+        krnl_sigma=cfg.pft_sigma,
+    )
+
+    criterion_ptt = KernelizedSupCon(
+        method="expw",
+        temperature=cfg.ptt_temperature,
+        base_temperature= cfg.ptt_base_temperature,
+        reg_term = cfg.ptt_reg_term,
+        kernel=kernel,
+        krnl_sigma=cfg.ptt_sigma,
     )
     
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
@@ -326,15 +334,23 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
-                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
+
+                features_vectorized = sym_matrix_to_vec(features.detach().cpu().numpy(), discard_diagonal = True)
+                features_vectorized = torch.tensor(features_vectorized).to(device)
+
+                ## KERNLIZED LOSS: MAT embedding vs MAT
+                kernel_embedded_feature_loss, direction_reg_features = criterion_pft(embedded_feat_vectorized.unsqueeze(1), features_vectorized)
+                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
+                direction_reg_features = 100 * direction_reg_features
 
                 ## TARGET DECODING FROM MAT EMBEDDING
+                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
                 out_target_decoded = model.decode_targets(reduced_feat_embedding)
 
                 ## KERNLIZED LOSS: MAT embedding vs targets
-                kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
-                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
-                direction_reg = 100 * direction_reg
+                kernel_embedded_target_loss, direction_reg_target = criterion_ptt(reduced_feat_embedding.unsqueeze(1), targets)
+                kernel_embedded_target_loss = 100 * kernel_embedded_target_loss
+                direction_reg_target = 100 * direction_reg_target
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
                 if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
@@ -344,8 +360,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
-                # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
+                loss = kernel_embedded_target_loss + kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                # print(kernel_embedded_target_loss, kernel_embedded_target_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
                     loss += feature_autoencoder_loss
@@ -366,9 +382,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 optimizer.step()
 
                 loss_terms_batch['loss'] = loss.item() / len(features)
+                loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
                 loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(features)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
-                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(features)
+                loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
+                loss_terms_batch['direction_reg_features_loss'] = direction_reg_features.item() / len(features)
                 
                 if not cfg.mat_ae_pretrained:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
@@ -381,8 +399,10 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'Epoch': epoch,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
+                    'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
-                    'direction_reg_loss': loss_terms_batch['direction_reg_loss'],
+                    'direction_reg_target_loss': loss_terms_batch['direction_reg_target_loss'],
+                    'direction_reg_features_loss': loss_terms_batch['direction_reg_features_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 
@@ -457,15 +477,15 @@ def main(cfg: DictConfig):
     train_ratio = cfg.train_ratio
 
     if multi_gpu:
+        print("Using multi-gpu")
         log_folder = Path("logs")
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="prepost",
-            # gpus_per_node=1,
+            slurm_partition="gpu_short",
+            gpus_per_node=1,
             tasks_per_node=1,
-            nodes=1,
-            cpus_per_task=30
+            nodes=1
             #slurm_constraint="v100-32g",
         )
         run_jobs = []

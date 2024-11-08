@@ -1,4 +1,4 @@
-project: "PhenProj | MatAE Pretrained"
+project: "PhenProj"
 experiment_name: "exp"
 hypothesis: "-"
 
@@ -7,25 +7,25 @@ input_dim_feat: 400
 output_dim_feat: 70
 hidden_dim: 100
 input_dim_target: 1
-output_dim_target: 3
+output_dim_target: 256
 
 # MatAutoencoder options
 skip_enc1: False
 ReEig: False
 
 # Pretrained models options
-mat_ae_pretrained: True
+mat_ae_pretrained: False
 target_ae_pretrained: False
-pretrained_mat_ae_exp: "external_mat_ae_abcd"
+pretrained_mat_ae_exp: "internal_mat_ae_abcd"
 pretrained_target_ae_exp: "target_ae"
-best_mat_ae_fold: 3
+best_mat_ae_fold: 4
 best_target_ae_fold: 1
 synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 100
-batch_size: 64
+num_epochs: 200
+batch_size: 128
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001
 weight_decay: 0
@@ -37,7 +37,7 @@ log_gradients: True
 clip_grad: True
 
 # test options
-external_test_mode: True
+external_test_mode: False # relevant if no part of the model is pretrained
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -47,28 +47,28 @@ test_scanners:
 SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 0.07
-pft_temperature: 0.07
-pft_sigma_univar: 1.0
-pft_sigma_multivar: 1.0
-reg_term: 0.01
+pft_base_temperature: 10
+pft_temperature: 10
+pft_sigma: 1.0
+pft_reg_term: 0.01
 
 ## target proj vs. targets
-ptt_base_temperature: 0.005
-ptt_temperature: 0.005
+ptt_base_temperature: 0.07
+ptt_temperature: 0.07
 ptt_sigma: 1
+ptt_reg_term: 0.01
 
 # Other losses
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
 joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
-target_decoding_crit: MSERobust  # Options: Norm, MSE
+target_decoding_crit: MSE  # Options: Norm, MSE
 huber_delta: 10
 
 # Data
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
 targets:
     - nihtbx_totalcomp_agecorrected
 standardize_targets: False
