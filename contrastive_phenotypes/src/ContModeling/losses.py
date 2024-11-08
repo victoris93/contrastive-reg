@@ -17,8 +17,7 @@ class KernelizedSupCon(nn.Module):
         contrast_mode: str = "all",
         base_temperature: float = 0.07,
         reg_term: float = 1.0,
-        krnl_sigma_univar: float = 1.0,
-        krnl_sigma_multivar: float = 1.0,
+        krnl_sigma: float = 1.0,
         kernel: callable = None,
         delta_reduction: str = "sum",
     ):
@@ -29,8 +28,7 @@ class KernelizedSupCon(nn.Module):
         self.reg_term = reg_term
         self.method = method
         self.kernel = kernel
-        self.krnl_sigma_univar = krnl_sigma_univar
-        self.krnl_sigma_multivar = krnl_sigma_multivar
+        self.krnl_sigma = krnl_sigma
         self.delta_reduction = delta_reduction
 
         if kernel is not None and method == "supcon":
@@ -49,7 +47,7 @@ class KernelizedSupCon(nn.Module):
         )
     
     def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
-        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma_multivar)
+        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma)
         direction_reg = self.reg_term * feat_mask
         return direction_reg
 
@@ -90,7 +88,7 @@ class KernelizedSupCon(nn.Module):
                 mask = scaler.fit_transform(mask.cpu().numpy())
                 mask = torch.tensor(mask, device=device).to(torch.float64)
             else:
-                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma_univar)
+                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma)
 
         view_count = features.shape[1]
         features = torch.cat(torch.unbind(features, dim=1), dim=0)
