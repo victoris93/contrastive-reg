@@ -5,7 +5,7 @@ import xarray as xr
 from tqdm import tqdm
 import sys
 
-root = "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
+root = "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
 run = 0
 exp_name = sys.argv[1]
 dataset = sys.argv[2]
@@ -22,13 +22,15 @@ distances, neighbors = neigh.kneighbors(embeddings, return_distance = True)
 data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels_1.nc')
 
 neigh_conn_var = []
-neigh_conn_dvar_ddist = []
 
-for neighborhood_idx, neighborhood in enumerate(tqdm(neighbors)):
+for neighborhood in tqdm(neighbors[0::1]):
+    
+    neighborhood_idx = neighborhood[0]
+    neigh_conn_dvar_ddist = []
     var = 0
     dist_neigh = distances[neighborhood_idx]
-    neigh_idx = sub_idx[neighborhood]
-    neigh_matrices = data.matrices.isel(subject = neigh_idx).values
+    neigh_indices= sub_idx[neighborhood]
+    neigh_matrices = data.matrices.isel(subject = neigh_indices).values
     centroid = neigh_matrices[0]
 
     for mat_idx, mat in enumerate(neigh_matrices):
@@ -40,7 +42,7 @@ for neighborhood_idx, neighborhood in enumerate(tqdm(neighbors)):
         neigh_conn_dvar_ddist.append(sub_dvar_ddist)
     
     neigh_conn_var.append(var / len(neighborhood[1:]))
-    np.save(f"{exp_dir}/embeddings/neigh_conn_dvar_ddist_{dataset}_neigh_idx{neighborhood_idx}.npy", np.array(neigh_conn_dvar_ddist))
+    np.save(f"{exp_dir}/embeddings/neigh_conn_dvar_ddist_{dataset}_neighborhood{neighborhood_idx}.npy", np.array(neigh_conn_dvar_ddist))
 
 neigh_conn_var = np.array(neigh_conn_var)
 np.save(f"{exp_dir}/embeddings/neigh_conn_var_{dataset}.npy", neigh_conn_var)
