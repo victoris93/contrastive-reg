@@ -47,7 +47,13 @@ class PhenoProj(nn.Module):
             nn.BatchNorm1d(hidden_dim),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            nn.Linear(hidden_dim, output_dim_target),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+            
+            nn.Linear(hidden_dim, output_dim_target)
             
         ) # we need to be able to invert this
         
@@ -94,6 +100,7 @@ class MatAutoEncoder(nn.Module):
         # ENCODE MATRICES
         self.enc_mat1 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat ,bias=False)
         self.enc_mat2 = nn.Linear(in_features=input_dim_feat, out_features=output_dim_feat, bias=False)
+        # nn.init.xavier_uniform_(self.enc_mat1.weight)
         self.enc_mat2.weight = torch.nn.Parameter(self.enc_mat1.weight) # Here weights are B_init_MRI.T
         
         # DECODE MATRICES
@@ -146,7 +153,22 @@ class TargetAutoEncoder(nn.Module):
         )
 
         self.decode_target = nn.Sequential(
-            nn.Linear(output_dim_target, input_dim_target),
+            nn.Linear(output_dim_target, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.BatchNorm1d(hidden_dim),
+            # nn.ELU(),
+            # nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, input_dim_target),
         )
 
     def encode_targets(self, y):

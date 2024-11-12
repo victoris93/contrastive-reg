@@ -116,10 +116,13 @@ class KernelizedSupCon(nn.Module):
         anchor_dot_contrast = torch.div(
             torch.matmul(features, features.T), self.temperature
         )
+        # print("anchor_dot_contrast", anchor_dot_contrast)
 
         # for numerical stability
         logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        # print("logits_max", logits_max)
         logits = anchor_dot_contrast - logits_max.detach()
+        # print("logits", logits)
 
         alignment = logits
 
@@ -127,6 +130,7 @@ class KernelizedSupCon(nn.Module):
         # - supcon if kernel = none
         # - y-aware is kernel != none
         uniformity = torch.exp(logits) * inv_diagonal
+        # print("uniformity", uniformity)
 
         if self.method == "threshold":
             repeated = mask.unsqueeze(-1).repeat(
@@ -148,23 +152,28 @@ class KernelizedSupCon(nn.Module):
 
         elif self.method == "expw":
             # exp weight e^(s_j(1-w_j))
-            uniformity = torch.exp(logits * (1 - mask)) * inv_diagonal
+            uniformity = (torch.exp(logits * (1 - mask)) + 1e-6) * inv_diagonal
+
+        # print("uniformity", uniformity)
 
         uniformity = torch.log(uniformity.sum(1, keepdim=True))
+        # print("uniformity", uniformity)
 
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
-        positive_mask = mask * inv_diagonal
-        direction_reg =  torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
-
+        positive_mask = mask  * inv_diagonal
+        # print("positive_mask", positive_mask)
+        direction_reg = torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
 
         log_prob = (
             alignment - uniformity # this is not in the formula
         )  # log(alignment/uniformity) = log(alignment) - log(uniformity)
+        # print("log_prob", log_prob)
         log_prob = (positive_mask * log_prob).sum(1) / positive_mask.sum(
             1
         )  # compute mean of log-likelihood over positive
 
+        # print("log_prob", log_prob.mean())
         # loss
 
         loss = -(self.temperature / self.base_temperature) * log_prob
