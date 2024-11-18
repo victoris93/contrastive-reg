@@ -5,7 +5,7 @@ import xarray as xr
 from tqdm import tqdm
 import sys
 
-root = "/lustre/fswork/projects/rech/ftj/commun/contrastive-phenotypes"
+root = "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
 run = 0
 exp_name = sys.argv[1]
 dataset = sys.argv[2]
@@ -24,8 +24,8 @@ data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels_1.nc')
 
 neigh_conn_var = []
 
+
 for neighborhood in tqdm(neighbors[0::step]):
-    
     neighborhood_idx = neighborhood[0]
     neigh_conn_dvar_ddist = []
     var = 0

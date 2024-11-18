@@ -1,13 +1,13 @@
 project: "PhenProj"
-experiment_name: "exp"
+experiment_name: "multivar_camcan_nonlin_pred_head"
 hypothesis: "-"
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 70
+output_dim_feat: 200
 hidden_dim: 100
-input_dim_target: 1
-output_dim_target: 256
+input_dim_target: 19
+output_dim_target: 50
 
 # MatAutoencoder options
 skip_enc1: False
@@ -24,8 +24,8 @@ synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 200
-batch_size: 128
+num_epochs: 100
+batch_size: 28
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001
 weight_decay: 0
@@ -45,11 +45,12 @@ test_scanners:
 
 # Contrastive loss parameters
 SupCon_kernel: cauchy
+SupConLoss_on_mat: False
 
 ## feature proj vs. targets
-pft_base_temperature: 10
-pft_temperature: 10
-pft_sigma: 1.0
+pft_base_temperature: 0.07
+pft_temperature: 0.07
+pft_sigma: 1
 pft_reg_term: 0.01
 
 ## target proj vs. targets
@@ -68,9 +69,44 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/camcan_400parcels_2.nc"
 targets:
-    - nihtbx_totalcomp_agecorrected
+    # - pea_wiscv_tss
+    # - nihtbx_picvocab_agecorrected
+    # - nihtbx_flanker_agecorrected
+    # - nihtbx_list_agecorrected 
+    # - nihtbx_cardsort_agecorrected
+    # - nihtbx_pattern_agecorrected
+    # - nihtbx_picture_agecorrected
+    # - nihtbx_reading_agecorrected
+    # - nihtbx_cryst_agecorrected
+    # - nihtbx_totalcomp_agecorrected
+    - age
+    - benton_faces
+    - cardio_measure_pulse_mean
+    - cardio_measure_bp_sys_mean
+    - cardio_measure_bp_dia_mean
+    - cattell
+    # - ekman_em_hex_pca1
+    # - ekman_em_hex_pca1_expv
+    - famous_faces
+    - hotel_time
+    - picture_priming_baseline_acc
+    - picture_priming_baseline_rt
+    # - picture_priming_priming_prime
+    # - picture_priming_priming_target
+    # - proverbs
+    - rt_choice
+    - rt_simple
+    - syn_sem_prop_error
+    - syn_sem_rt
+    - tip_of_tongue
+    - VSTM_colour_K_mean
+    - VSTM_colour_K_precision
+    - VSTM_colour_K_doubt
+    - VSTM_colour_MSE
+    
+    
 standardize_targets: False
 
 # Directory for saving results
