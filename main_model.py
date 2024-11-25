@@ -547,7 +547,7 @@ def objective(cfg, trial, mape, corr):
                 cfg[param_name] = trial.suggest_categorical(param_name, param_config.values)
     avg_mape = np.mean(mape)
     avg_corr = np.mean(corr)
-    return [avg_mape, avg_corr]
+    return avg_mape#[avg_mape, avg_corr]
 
 @hydra.main(config_path=".", config_name="main_model_config_optuna")
 def main(cfg: DictConfig):
@@ -610,8 +610,8 @@ def main(cfg: DictConfig):
 
     losses, predictions, embeddings, mape, corr = zip(*run_results)
     
-    study = optuna.create_study(direction=cfg.optuna.direction)
-    study.optimize(lambda trial: objective(trial, cfg, mape, corr), n_trials=cfg.optuna.n_trials)
+    study = optuna.create_study(direction= "minimize")#à remplacer par cfg. qqchose une fois que c'est compris + gerer direction = ['minimize','maximize']
+    study.optimize(lambda trial: objective(trial, cfg, mape, corr), n_trials=1)#pareil
 
     # Print the best trial
     print("Optuna Study Results:")
