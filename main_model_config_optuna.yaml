@@ -76,15 +76,15 @@ test_scanners:
 SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 0.07
-pft_temperature: 0.07
+# pft_base_temperature: 0.07
+# pft_temperature: 0.07
 pft_sigma_univar: 1.0
 pft_sigma_multivar: 1.0
 reg_term: 0.01
 
 ## target proj vs. targets
-ptt_base_temperature: 0.005
-ptt_temperature: 0.005
+# ptt_base_temperature: 0.005
+# ptt_temperature: 0.005
 ptt_sigma: 1
 
 # Other losses

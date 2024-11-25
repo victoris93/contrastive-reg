@@ -246,7 +246,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                         })
             wandb.finish()
             
-            self.results = (losses, predictions, self.embeddings)
+            self.results = (losses, predictions, self.embeddings, mape, corr)
 
         if save_model:
             saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
