@@ -1,0 +1,107 @@
+project: "PhenProj with MatAe pretrained | CamCan | test"
+experiment_name: "strong pretraining, 3 layer decoder, 19 targets, 3 augmentations, 100 epochs, 10 runs"
+hypothesis: "-"
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 200
+hidden_dim: 100
+input_dim_target: 19
+output_dim_target: 256
+num_targets : 3
+
+# MatAutoencoder options
+skip_enc1: False
+ReEig: False
+
+# Pretrained models options
+mat_ae_pretrained: True
+target_ae_pretrained: False
+pretrained_mat_ae_exp: "pretraining mat with embeddings 200 and 200 epochs"
+pretrained_target_ae_exp: "target_ae"
+best_mat_ae_fold: 2
+best_target_ae_fold: 1
+synth_exp: False
+
+# Training parameters
+multi_gpu: True
+num_epochs: 100
+batch_size: 32
+n_runs: 10 # set 1 if some part of the model is pretrained (the test set should be the same)
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+scheduler_patience: 10
+test_ratio: 0.3 # makes no difference if some part of the model is pretrained
+train_ratio: 1.0
+log_gradients: True
+clip_grad: True
+
+# test options
+external_test_mode: False
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+
+# Contrastive loss parameters
+SupCon_kernel: cauchy
+
+## feature proj vs. targets
+pft_base_temperature: 0.07
+pft_temperature: 0.07
+pft_sigma_univar: 1.0
+pft_sigma_multivar: 1.0
+reg_term: 0.01
+
+## target proj vs. targets
+ptt_base_temperature: 0.005
+ptt_temperature: 0.005
+ptt_sigma: 1
+
+# Other losses
+feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
+joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
+target_decoding_crit: MSERobust  # Options: Norm, MSE
+huber_delta: 10
+
+# Data
+augmentations : ["SVD_augmentation", "random_threshold_augmentation","gpc"]
+mat_threshold: 0
+# Paths for data
+dataset_path: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/dataset_400parcels_3.nc"
+targets:
+    - age
+    - benton_faces
+    - cardio_measure_pulse_mean
+    - cardio_measure_bp_sys_mean
+    - cardio_measure_bp_dia_mean
+    - cattell
+    # - ekman_em_hex_pca1
+    # - ekman_em_hex_pca1_expv
+    - famous_faces
+    - hotel_time
+    - picture_priming_baseline_acc
+    - picture_priming_baseline_rt
+    # - picture_priming_priming_prime
+    # - picture_priming_priming_target
+    # - proverbs
+    - rt_choice
+    - rt_simple
+    - syn_sem_prop_error
+    - syn_sem_rt
+    - tip_of_tongue
+    - VSTM_colour_K_mean
+    - VSTM_colour_K_precision
+    - VSTM_colour_K_doubt
+    - VSTM_colour_MSE
+    
+standardize_targets: false
+
+# Directory for saving results
+work_dir: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3"
+reconstructed_dir : recon_mat
+embedding_dir : embeddings
+model_weight_dir : saved_models
+output_dir: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/results"
+

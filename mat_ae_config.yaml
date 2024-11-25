@@ -1,0 +1,52 @@
+project: "Pretrain mat AE CamCan"
+experiment_name: "pretraining mat ae for test"
+
+hypothesis: "-"
+# Training parameters
+multi_gpu: True
+num_epochs: 1
+batch_size: 64
+kfolds: 5
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+scheduler_patience: 10
+test_size : 0.3
+seed : 42
+log_gradients: True
+clip_grad: True
+synth_exp: True
+
+# test options
+external_test_mode: False
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+
+# enhancements
+ReEig: False
+skip_enc1: False
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 70
+input_type: "matrices" # Options: matrices, targets
+
+# Loss function and optimizer
+loss_function: Norm  # Options: LogEuclidean, Norm, MSE
+
+# modify manually if test is run as a separate job
+best_fold: 1
+
+# Paths for data
+dataset_path: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/dataset_400parcels_2.nc"
+targets:
+    - age
+
+# Directory for saving results
+work_dir: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3"
+embedding_dir : embeddings
+reconstructed_dir : recon_mat
+model_weight_dir : saved_models
+output_dir: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/results"

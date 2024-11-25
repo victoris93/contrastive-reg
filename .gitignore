@@ -14,3 +14,9 @@ outputs/
 nifti_camcan/
 connectivity_matrices/
 nilearn_cache/
+viz_to_present/
+dataset_400parcels_3.nc
+dataset_400parcels_2.nc
+dataset_400parcels_2.zip
+dataset_400parcels.nc
+*.nc

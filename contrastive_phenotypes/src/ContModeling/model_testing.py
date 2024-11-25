@@ -25,7 +25,7 @@ import sys
 from .viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .utils import mean_correlations_between_subjects, mape_between_subjects
 from .losses import LogEuclideanLoss, NormLoss
-from .models import AutoEncoder
+from .models import MatAutoEncoder
 from .helper_classes import MatData
 
 

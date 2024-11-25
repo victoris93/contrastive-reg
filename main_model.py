@@ -22,11 +22,11 @@ from sklearn.model_selection import (
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
-# from augmentations import augs, aug_args
+from ContModeling.augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, PowerTransformer
 
 from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
@@ -67,7 +67,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
 
-            augmentations = cfg.augmentation
+            augmentations = cfg.augmentations
 
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
@@ -99,10 +99,15 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
             train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-            std_train_targets, mean, std= standardize(train_targets)
-            # scaler = MinMaxScaler().fit(train_targets)
-            # train_targets = scaler.transform(train_targets)
-
+            #std_train_targets, mean, std= standardize(train_targets)
+            #scaler = PowerTransformer(method='box-cox', standardize=True).fit(train_targets)
+            #train_targets = scaler.transform(train_targets)
+            #train_targets, scalers = scale_targets_independently(train_targets)
+            #train_targets = torch.nn.functional.normalize(torch.tensor(train_targets).to(device)).cpu().numpy()
+            #scaler = PowerTransformer(method='yeo-johnson').fit(train_targets)
+            #train_targets = scaler.transform(train_targets)
+            train_targets = np.log1p(train_targets+1)
+            
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
 
@@ -112,42 +117,45 @@ class ModelRun(submitit.helpers.Checkpointable):
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
             test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
-            # test_targets = scaler.transform(test_targets)
+            test_targets = np.log1p(test_targets+1)
+            #test_targets = scaler.transform(test_targets)
+            #test_targets = transform_targets_independently(test_targets, scalers)
+            #test_targets = torch.nn.functional.normalize(torch.tensor(test_targets).to(device)).cpu().numpy()
 
             ### Augmentation
-            if augmentations != 'None':
-#                 aug_params = {}
-                if not isinstance(augmentations, list):
-                    augmentations = [augmentations]
-                n_augs = len(augmentations)
-                vect_train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                n_samples = len(train_dataset)
-                n_features = vect_train_features.shape[-1]
-                new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
-                new_train_features[:n_samples, 0, :] = vect_train_features
+#             if augmentations != 'None':
+# #                 aug_params = {}
+#                 if not isinstance(augmentations, list):
+#                     augmentations = [augmentations]
+#                 n_augs = len(augmentations)
+#                 vect_train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
+#                 n_samples = len(train_dataset)
+#                 n_features = vect_train_features.shape[-1]
+#                 new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
+#                 new_train_features[:n_samples, 0, :] = vect_train_features
 
-                for i, aug in enumerate(augmentations):
-                    transform = augs[aug]
-                    transform_args = aug_args[aug]
-#                     aug_params[aug] = transform_args # to save later in the metrics df
+#                 for i, aug in enumerate(augmentations):
+#                     transform = augs[aug]
+#                     transform_args = aug_args[aug]
+# #                     aug_params[aug] = transform_args # to save later in the metrics df
 
-                    num_aug = i + 1
-                    aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
-                    aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
+#                     num_aug = i + 1
+#                     aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
+#                     aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
 
-                    new_train_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
+#                     new_train_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
 
-                train_features = new_train_features
-                train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
+#                 train_features = new_train_features
+#                 train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
             
             train_dataset = TensorDataset(train_features, torch.from_numpy(train_targets).to(torch.float32))
             test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
 
-            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
+            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
 
-            mean = torch.tensor(mean).to(device) #do we need this?
-            std  = torch.tensor(std).to(device)
+            #mean = torch.tensor(mean).to(device) #do we need this?
+            #std  = torch.tensor(std).to(device)
 
             wandb.init(project=cfg.project,
                 mode = "offline",
@@ -163,8 +171,11 @@ class ModelRun(submitit.helpers.Checkpointable):
                 train_dataset = Subset(dataset, train_indices)
                 train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
                 train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
+                train_targets = np.log1p(train_targets+1)
+                #train_targets = scaler.transform(train_targets)
                 train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
-                std_train_targets,_,_ = standardize(train_targets)
+                #std_train_targets,_,_ = standardize(train_targets)
+                
 
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     is_test = True
@@ -191,13 +202,32 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
                     X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
                     y_pred = model.decode_targets(X_emb_reduced)
-
+                    # y_pred = []
+                    # for target_index in range(y.size(1)):
+                    #     # Decode the specific target using the reduced feature embedding
+                    #     out_single_target_decoded = model.decode_targets(X_emb_reduced, target_index)
+                        
+                    #     # Extract the decoded target for the current target_index
+                    #     out_target_decoded = out_single_target_decoded[:, 0]
+                    #     y_pred.append(out_target_decoded.unsqueeze(1))
+                    # # Stack the decoded targets (assuming you want them to be in the same shape as targets)
+                    # y_pred = torch.cat(y_pred, dim=1)
+                    #y_pred = inverse_scale_targets_independently(y_pred.cpu().numpy(), scalers)
+                    #y_pred = scaler.inverse_transform(y_pred.cpu().numpy())
+                    y_pred = np.exp(y_pred.cpu().numpy())-1
+                    # np.save(f'{recon_mat_dir}/y_pred_run{run}', y_pred)
+                    y_pred = torch.tensor(y_pred).to(device)
+                    #y = scaler.inverse_transform(y.cpu().numpy())
+                    y = np.exp(y.cpu().numpy())-1
+                    # np.save(f'{recon_mat_dir}/y_run{run}', y)
+                    y = torch.tensor(y).to(device)
+                    
                     save_embeddings(X_embedded, "mat", cfg, is_test, run)
                     save_embeddings(X_emb_reduced, "joint", cfg, is_test, run)
 
                     if label == 'test':
                         epsilon = 1e-8
-                        mape =  100 * torch.mean(torch.abs((y - y_pred)) / torch.abs((y + epsilon))).item()
+                        mape =  100 * torch.mean(torch.abs(y - y_pred) / torch.abs((y + epsilon))).item()
                         corr =  spearmanr(y.cpu().numpy().flatten(), y_pred.cpu().numpy().flatten())[0]
 
                         wandb.log({
@@ -229,9 +259,10 @@ class ModelRun(submitit.helpers.Checkpointable):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
         
-def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
+def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model=None, device=device):
     print("Start training...")
 
+    augmentations = cfg.augmentations
     # MODEL DIMS
     input_dim_feat = cfg.input_dim_feat
     input_dim_target = cfg.input_dim_target
@@ -239,6 +270,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     output_dim_target = cfg.output_dim_target
     output_dim_feat = cfg.output_dim_feat
     kernel = SUPCON_KERNELS[cfg.SupCon_kernel]
+    num_targets = cfg.num_targets
     
     # TRAINING PARAMS
     lr = cfg.lr
@@ -250,8 +282,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-    mean= torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
+    #mean= torch.tensor(mean).to(device)
+    #std = torch.tensor(std).to(device)
     if model is None:
         model = PhenoProj(
             input_dim_feat,
@@ -295,6 +327,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     loss_terms = []
     validation = []
     autoencoder_features = []
+    
+    
 
     gc.collect()
     
@@ -323,28 +357,84 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     ## FEATURE DECODING LOSS
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
                 
-                ## REDUCED FEAT TO TARGET EMBEDDING
-                embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
-                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
-                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
+                if augmentations != 'None':
+#                 aug_params = {}
+                    # if not isinstance(augmentations, list):
+                    #     augmentations = [augmentations]
+                    # if isinstance(augmentations, list):
+                    #     # Flatten any nested lists in augmentations
+                    #     augmentations = [aug if isinstance(aug, str) else aug[0] for aug in augmentations]
+                    # else:
+                    #     augmentations = [augmentations]
+                    n_augs = len(augmentations)
+                    vect_embedded_features = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal=True)
+                    n_samples = len(embedded_feat)
+                    n_features = vect_embedded_features.shape[-1]
+                    #new_embedded_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
+                    new_embedded_features = np.zeros((n_samples + n_samples * n_augs, n_features))
+                    #new_embedded_features[:n_samples, 0, :] = vect_embedded_features
+                    new_embedded_features[:n_samples, :] = vect_embedded_features
+                    for i, aug in enumerate(augmentations):
+                        transform = augs[aug]
+                        transform_args = aug_args[aug]
+    #                     aug_params[aug] = transform_args # to save later in the metrics df
 
+                        num_aug = i + 1
+                        aug_features = np.array([transform(sample, **transform_args) for sample in embedded_feat.detach().cpu().numpy()])
+                        aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
+
+                        #new_embedded_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
+                        new_embedded_features[n_samples * num_aug: n_samples * (num_aug + 1),:] = aug_features
+
+                    embedded_feat = torch.tensor(new_embedded_features).to(device)
+                    embedded_feat = embedded_feat.float()
+                    targets = torch.cat([targets]*(n_augs + 1), axis=0).to(device)
+                
+                
+                ## REDUCED FEAT TO TARGET EMBEDDING
+                # embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
+                # embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
+                # reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
+                reduced_feat_embedding = model.transfer_embedding(embedded_feat)
+                
+                ##KERNELIZED LOSS : MAT embeddings vs MAT vectorized
+                # feat_vectorized = sym_matrix_to_vec(features.detach().cpu().numpy(), discard_diagonal = True)
+                # feat_vectorized = torch.tensor(feat_vectorized).to(device)
+                # kernel_embedding_loss, direction_reg_embedding = criterion_pft(embedded_feat_vectorized.unsqueeze(1), feat_vectorized)
+                # kernel_embedding_loss = 100 * kernel_embedding_loss
+                # direction_reg_embedding = 100*direction_reg_embedding
                 ## TARGET DECODING FROM MAT EMBEDDING
                 out_target_decoded = model.decode_targets(reduced_feat_embedding)
 
                 ## KERNLIZED LOSS: MAT embedding vs targets
                 kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
-                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
+                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss 
                 direction_reg = 100 * direction_reg
-
+                
+                ## SECOND KERNELIZED LOSS : Reduced MAT embeddings vs MAT vectorized
+                # kernel_feature_loss, direction_reg_reduced_embedding = criterion_pft(reduced_feat_embedding.unsqueeze(1), feat_vectorized)
+                # kernel_feature_loss = 100* kernel_feature_loss
+                # direction_reg_reduced_embedding = 100* direction_reg_reduced_embedding
+               
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
                 if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
                     target_decoding_crit = nn.HuberLoss(delta = cfg.huber_delta)
                 
                 target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded) / 100
-
+                # target_decoding_from_reduced_emb_loss = 0
+                # print("targets", targets.shape)
+                # for target_index in range(targets.size(1)):
+                #     target = targets[:, target_index]
+                #     print("target", target.shape)
+                #     # Decode the specific target using the appropriate decoder
+                #     out_target_decoded = model.decode_targets(reduced_feat_embedding, target_index)
+                #     print("out_target_decoded", out_target_decoded.shape)
+                #     # Calculate loss for this specific target
+                #     target_loss = target_decoding_crit(target, out_target_decoded) / 100
+                #     target_decoding_from_reduced_emb_loss += target_loss
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss #+ kernel_feature_loss #+ kernel_feature_loss #+ kernel_embedding_loss
                 # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
@@ -400,7 +490,19 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
                     transfer_out_feat = model.transfer_embedding(out_feat)
                     out_target_decoded = model.decode_targets(transfer_out_feat)
-                    
+                    # all_decoded_targets = []
+                    # for target_index in range(targets.size(1)):
+                    #     # Decode the specific target using the reduced feature embedding
+                    #     out_single_target_decoded = model.decode_targets(transfer_out_feat, target_index)
+                        
+                    #     # Extract the decoded target for the current target_index
+                    #     out_target_decoded = out_single_target_decoded[:, 0]
+                    #     all_decoded_targets.append(out_target_decoded.unsqueeze(1))
+
+                    # # Stack the decoded targets (assuming you want them to be in the same shape as targets)
+                    # all_decoded_targets = torch.cat(all_decoded_targets, dim=1)
+                    #out_target_decoded_denormalized = inverse_scale_targets_independently(out_target_decoded.cpu().numpy(), scalers)
+                    #targets_denormalized = inverse_scale_targets_independently(targets.cpu().numpy(), scalers)
                     epsilon = 1e-8
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
                     corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
@@ -431,7 +533,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     loss_terms = pd.DataFrame(loss_terms)
     return loss_terms, model
 
-@hydra.main(config_path=".", config_name="main_model_config")
+@hydra.main(config_path=".", config_name="main_model_config_optuna")
 def main(cfg: DictConfig):
 
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
@@ -457,7 +559,7 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu_short",
+            slurm_partition="gpu-best",
             gpus_per_node=1,
             tasks_per_node=1,
             nodes=1
