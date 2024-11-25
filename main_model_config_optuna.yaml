@@ -1,6 +1,25 @@
+defaults:
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: tpe
+hydra : 
+  sweeper :
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 123
+      #warn_independent_sampling: true
+    #_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+    direction: minimize
+    storage: null
+    study_name: test main model optuna
+    n_trials: 20
+    n_jobs: 1
+    params:
+      # lr: tag(log, interval(1e-5, 1e-2))
+      batch_size: choice(32, 64)
+
 # config.yaml
 project: "PhenProj with MatAe pretrained | CamCan | test"
-experiment_name:  "optuna 1 epoch final model"
+experiment_name:  "test model optuna"
 hypothesis: "-"
 
 # Model dimensions
@@ -106,21 +125,4 @@ embedding_dir : embeddings
 model_weight_dir : saved_models
 output_dir: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/results"
 
-# Optuna configuration
-defaults:
-  - override hydra/sweeper: optuna
 
-sampler:
-  _target_: optuna.samplers.TPESampler
-  seed: 123
-  n_startup_trials: 10
-  warn_independent_sampling: true
-_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
-direction: minimize
-storage: null
-study_name: test main model optuna
-n_trials: 20
-n_jobs: 1
-max_failure_rate: 0.0
-params:
-  lr: tag(log, interval(1e-5, 1e-1))
