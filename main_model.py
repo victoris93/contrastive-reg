@@ -27,7 +27,7 @@ import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, PowerTransformer
-
+import optuna
 from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
 from ContModeling.models import PhenoProj
@@ -325,7 +325,8 @@ def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
 
     loss_terms = []
-    validation = []
+    validation_mape = []
+    validation_corr = []
     autoencoder_features = []
     
     
@@ -503,7 +504,7 @@ def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model
                     # all_decoded_targets = torch.cat(all_decoded_targets, dim=1)
                     #out_target_decoded_denormalized = inverse_scale_targets_independently(out_target_decoded.cpu().numpy(), scalers)
                     #targets_denormalized = inverse_scale_targets_independently(targets.cpu().numpy(), scalers)
-                    epsilon = 1e-8
+                    epsilon = 1e-6
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
                     corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
                     mape_batch+=mape.item()
@@ -511,7 +512,8 @@ def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model
 
                 mape_batch = mape_batch/len(test_loader)
                 corr_batch = corr_batch/len(test_loader)
-                validation.append(mape_batch)
+                validation_mape.append(mape_batch)
+                validation_corr.append(corr_batch)
 
             wandb.log({
                 'Target MAPE/val' : mape_batch,
@@ -532,6 +534,20 @@ def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model
     wandb.finish()
     loss_terms = pd.DataFrame(loss_terms)
     return loss_terms, model
+
+def objective(cfg, trial, mape, corr):
+    for param_name, param_config in cfg.optuna.search_space.items():
+            if param_config.type == "loguniform":
+                cfg[param_name] = trial.suggest_loguniform(param_name, param_config.min, param_config.max)
+            elif param_config.type == "uniform":
+                cfg[param_name] = trial.suggest_uniform(param_name, param_config.min, param_config.max)
+            elif param_config.type == "int":
+                cfg[param_name] = trial.suggest_int(param_name, param_config.min, param_config.max)
+            elif param_config.type == "categorical":
+                cfg[param_name] = trial.suggest_categorical(param_name, param_config.values)
+    avg_mape = np.mean(mape)
+    avg_corr = np.mean(corr)
+    return [avg_mape, avg_corr]
 
 @hydra.main(config_path=".", config_name="main_model_config_optuna")
 def main(cfg: DictConfig):
@@ -566,7 +582,7 @@ def main(cfg: DictConfig):
             #slurm_constraint="v100-32g",
         )
         run_jobs = []
-
+    
         with executor.batch():
             train_size = int(n_sub * (1 - test_ratio) * train_ratio)
             run_size = test_size + train_size
@@ -592,8 +608,36 @@ def main(cfg: DictConfig):
             job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
             run_results.append(job)
 
-    losses, predictions, embeddings = zip(*run_results)
+    losses, predictions, embeddings, mape, corr = zip(*run_results)
+    
+    study = optuna.create_study(direction=cfg.optuna.direction)
+    study.optimize(lambda trial: objective(trial, cfg, mape, corr), n_trials=cfg.optuna.n_trials)
 
+    # Print the best trial
+    print("Optuna Study Results:")
+    print(f"Best Trial Number: {study.best_trial.number}")
+    print(f"Best Value: {study.best_value}")
+    print("Best Parameters:")
+    for key, value in study.best_trial.params.items():
+        print(f"  {key}: {value}")
+
+    # Save study results
+    results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
+    os.makedirs(results_dir, exist_ok=True)
+
+    with open(f"{results_dir}/optuna_results.txt", "w") as f:
+        f.write("Optuna Study Results:\n")
+        f.write(f"Best Trial Number: {study.best_trial.number}\n")
+        f.write(f"Best Value: {study.best_value}\n")
+        f.write("Best Parameters:\n")
+        for key, value in study.best_trial.params.items():
+            f.write(f"  {key}: {value}\n")
+
+    # Save the study object for later use
+    with open(f"{results_dir}/optuna_study.pkl", "wb") as f:
+        pickle.dump(study, f)
+        
+        
     prediction_metrics = predictions[0]
     for prediction in predictions[1:]:
         prediction_metrics.update(prediction)
