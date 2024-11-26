@@ -687,16 +687,16 @@ def main(cfg: DictConfig):
 
         # Return the optimization objective (minimize MAPE, maximize correlation)
         trial.set_user_attr("avg_corr", avg_corr)  # Optional: log additional metrics
-        return avg_mape, - avg_corr
+        return avg_mape, avg_corr
     
     study = optuna.create_study(directions=["minimize", "maximize"])  # Change to "maximize" if optimizing correlation
     study.optimize(objective, n_trials=cfg.optuna.n_trials)
 
-    # Log best trial
-    print("Best trial:")
-    print(f"  Value: {study.best_value}")
-    print(f"  Params: {study.best_params}")
-    print(f"  Additional metrics: {study.best_trial.user_attrs}")
+    print("Pareto Front Trials:")
+    for i, trial in enumerate(study.best_trials):
+        print(f"Trial {i}:")
+        print(f"  Values (MAPE, Correlation): {trial.values}")  # Multi-objective values
+        print(f"  Params: {trial.params}")
         
         
 
