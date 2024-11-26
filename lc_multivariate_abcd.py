@@ -68,7 +68,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                 random_state = np.random.RandomState(random_state)
 
             augmentations = cfg.augmentation
-
+            
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
     
@@ -474,7 +474,8 @@ def main(cfg: DictConfig):
     indices = np.arange(n_sub)
     n_runs = cfg.n_runs
     multi_gpu = cfg.multi_gpu
-    train_ratio = cfg.train_ratio
+    train_ratios = cfg.train_ratio
+    print("Train ratios: ", train_ratios)
 
     if multi_gpu:
         print("Using multi-gpu")
@@ -491,12 +492,13 @@ def main(cfg: DictConfig):
         run_jobs = []
 
         with executor.batch():
-            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-            run_size = test_size + train_size
-            for run in tqdm(range(n_runs)):
-                run_model = ModelRun()
-                job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-                run_jobs.append(job)
+            for train_ratio in tqdm(train_ratios, desc="Training Size"):
+                train_size = int(n_sub * (1 - test_ratio) * train_ratio)
+                run_size = test_size + train_size
+                for run in tqdm(range(n_runs)):
+                    run_model = ModelRun()
+                    job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                    run_jobs.append(job)
 
         async def get_result(run_jobs):
             run_results = []
@@ -508,12 +510,13 @@ def main(cfg: DictConfig):
 
     else:
         run_results = []
-        train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-        run_size = test_size + train_size
-        for run in tqdm(range(n_runs), desc="Model Run"):
-            run_model = ModelRun()
-            job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-            run_results.append(job)
+        for train_ratio in tqdm(train_ratios, desc="Training Size"):
+            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
+            run_size = test_size + train_size
+            for run in tqdm(range(n_runs), desc="Model Run"):
+                run_model = ModelRun()
+                job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                run_results.append(job)
 
     losses, predictions, embeddings = zip(*run_results)
 
