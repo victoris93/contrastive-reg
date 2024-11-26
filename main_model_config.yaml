@@ -1,5 +1,5 @@
 project: "PhenProj with MatAe pretrained | CamCan | test"
-experiment_name: "strong pretraining, 3 layer decoder, 19 targets, 3 augmentations, 100 epochs, 10 runs"
+experiment_name: "final model partial optuna"
 hypothesis: "-"
 
 # Model dimensions
@@ -7,7 +7,7 @@ input_dim_feat: 400
 output_dim_feat: 200
 hidden_dim: 100
 input_dim_target: 19
-output_dim_target: 256
+output_dim_target: 512
 num_targets : 3
 
 # MatAutoencoder options
@@ -28,9 +28,9 @@ multi_gpu: True
 num_epochs: 100
 batch_size: 32
 n_runs: 10 # set 1 if some part of the model is pretrained (the test set should be the same)
-lr: 0.001
-weight_decay: 0
-dropout_rate: 0
+lr: 0.00289
+weight_decay: 1.71356e-05
+dropout_rate: 0.1653
 scheduler_patience: 10
 test_ratio: 0.3 # makes no difference if some part of the model is pretrained
 train_ratio: 1.0
@@ -48,15 +48,15 @@ test_scanners:
 SupCon_kernel: cauchy
 
 ## feature proj vs. targets
-pft_base_temperature: 0.07
-pft_temperature: 0.07
+pft_base_temperature: 0.6856
+pft_temperature: 0.6856
 pft_sigma_univar: 1.0
 pft_sigma_multivar: 1.0
-reg_term: 0.01
+reg_term: 0.0639
 
 ## target proj vs. targets
-ptt_base_temperature: 0.005
-ptt_temperature: 0.005
+ptt_base_temperature: 0.58516
+ptt_temperature: 0.58516
 ptt_sigma: 1
 
 # Other losses
