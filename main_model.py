@@ -535,19 +535,7 @@ def train(run, train_ratio, train_dataset, test_dataset, B_init_fMRI, cfg, model
     loss_terms = pd.DataFrame(loss_terms)
     return loss_terms, model
 
-def objective(cfg, trial, mape, corr):
-    for param_name, param_config in cfg.optuna.search_space.items():
-            if param_config.type == "loguniform":
-                cfg[param_name] = trial.suggest_loguniform(param_name, param_config.min, param_config.max)
-            elif param_config.type == "uniform":
-                cfg[param_name] = trial.suggest_uniform(param_name, param_config.min, param_config.max)
-            elif param_config.type == "int":
-                cfg[param_name] = trial.suggest_int(param_name, param_config.min, param_config.max)
-            elif param_config.type == "categorical":
-                cfg[param_name] = trial.suggest_categorical(param_name, param_config.values)
-    avg_mape = np.mean(mape)
-    avg_corr = np.mean(corr)
-    return avg_mape#[avg_mape, avg_corr]
+
 
 @hydra.main(config_path=".", config_name="main_model_config_optuna")
 def main(cfg: DictConfig):
@@ -568,123 +556,149 @@ def main(cfg: DictConfig):
     n_runs = cfg.n_runs
     multi_gpu = cfg.multi_gpu
     train_ratio = cfg.train_ratio
-
-    if multi_gpu:
-        print("Using multi-gpu")
-        log_folder = Path("logs")
-        executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
-        executor.update_parameters(
-            timeout_min=120,
-            slurm_partition="gpu-best",
-            gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1
-            #slurm_constraint="v100-32g",
-        )
-        run_jobs = []
     
-        with executor.batch():
+    def objective(trial):
+        # Suggest hyperparameters using the trial object
+        lr = trial.suggest_loguniform("lr", 1e-5, 1e-2)
+        output_dim_target = trial.suggest_categorical("output_dim_target", [128, 256, 512])
+        hidden_dim = trial.suggest_categorical("hidden_dim", [50, 100, 200])
+        batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
+        weight_decay = trial.suggest_loguniform("weight_decay", 1e-6, 1e-3)
+        dropout_rate = trial.suggest_uniform("dropout_rate", 0.0, 0.5)
+        pft_base_temperature = trial.suggest_uniform("pft_base_temperature", 0.01, 1.0)
+        pft_temperature = pft_base_temperature
+        ptt_base_temperature = trial.suggest_uniform("ptt_base_temperature", 0.01, 1.0)
+        ptt_temperature = ptt_base_temperature
+        reg_term = trial.suggest_loguniform("reg_term", 1e-4, 1e-1)
+        
+        # Update config with trial parameters
+        cfg.lr = lr
+        cfg.output_dim_target = output_dim_target
+        cfg.hidden_dim = hidden_dim
+        cfg.batch_size = batch_size
+        cfg.weight_decay = weight_decay
+        cfg.dropout_rate = dropout_rate
+        cfg.pft_base_temperature = pft_base_temperature
+        cfg.pft_temperature = pft_temperature
+        cfg.ptt_base_temperature = ptt_base_temperature
+        cfg.ptt_temperature = ptt_temperature
+        cfg.reg_term = reg_term
+
+        dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
+        n_sub = len(dataset)
+        test_size = int(test_ratio * n_sub)
+        indices = np.arange(n_sub)
+        n_runs = cfg.n_runs
+        multi_gpu = cfg.multi_gpu
+        train_ratio = cfg.train_ratio
+
+        if multi_gpu:
+            print("Using multi-gpu")
+            log_folder = Path("logs")
+            executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
+            executor.update_parameters(
+                timeout_min=120,
+                slurm_partition="gpu-best",
+                gpus_per_node=1,
+                tasks_per_node=1,
+                nodes=1
+                #slurm_constraint="v100-32g",
+            )
+            run_jobs = []
+        
+            with executor.batch():
+                train_size = int(n_sub * (1 - test_ratio) * train_ratio)
+                run_size = test_size + train_size
+                for run in tqdm(range(n_runs)):
+                    run_model = ModelRun()
+                    job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                    run_jobs.append(job)
+
+            async def get_result(run_jobs):
+                run_results = []
+                for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in run_jobs]), total=len(run_jobs)):
+                    res = await aws
+                    run_results.append(res)
+                return run_results
+            run_results = asyncio.run(get_result(run_jobs))
+
+        else:
+            run_results = []
             train_size = int(n_sub * (1 - test_ratio) * train_ratio)
             run_size = test_size + train_size
-            for run in tqdm(range(n_runs)):
+            for run in tqdm(range(n_runs), desc="Model Run"):
                 run_model = ModelRun()
-                job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-                run_jobs.append(job)
+                job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                run_results.append(job)
 
-        async def get_result(run_jobs):
-            run_results = []
-            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in run_jobs]), total=len(run_jobs)):
-                res = await aws
-                run_results.append(res)
-            return run_results
-        run_results = asyncio.run(get_result(run_jobs))
+        losses, predictions, embeddings, mape, corr = zip(*run_results)
+        
+        prediction_metrics = predictions[0]
+        for prediction in predictions[1:]:
+            prediction_metrics.update(prediction)
 
-    else:
-        run_results = []
-        train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-        run_size = test_size + train_size
-        for run in tqdm(range(n_runs), desc="Model Run"):
-            run_model = ModelRun()
-            job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-            run_results.append(job)
+        pred_results = []
+        for k, v in prediction_metrics.items():
+            true_targets, predicted_targets, indices = v
+            
+            true_targets_dict = {"train_ratio": [k[0]] * len(true_targets),
+                                "model_run":[k[1]] * len(true_targets),
+                                "dataset":[k[2]] * len(true_targets)
+                                }
+            predicted_targets_dict = {"indices": indices}
+            
+            for i, target in enumerate(targets):
+                true_targets_dict[target] = true_targets[:, i]
+                predicted_targets_dict[f"{target}_pred"] = predicted_targets[:, i]
+                
+                
+            true_targets = pd.DataFrame(true_targets_dict)
+            predicted_targets = pd.DataFrame(predicted_targets_dict)
+            
+            pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
+        pred_results = pd.concat(pred_results)
+        pred_results.to_csv(f"{results_dir}/pred_results.csv", index=False)
 
-    losses, predictions, embeddings, mape, corr = zip(*run_results)
+        prediction_mape_by_element = []
+        for k, v in prediction_metrics.items():
+            true_targets, predicted_targets, indices = v
+            
+            mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
+            
+            for i, mape in enumerate(mape_by_element):
+                prediction_mape_by_element.append(
+                    {
+                        'train_ratio': k[0],
+                        'model_run': k[1],
+                        'dataset': k[2],
+                        'mape': mape
+                    }
+                )
+
+        df = pd.DataFrame(prediction_mape_by_element)
+        df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
+        df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
+        df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
+        df.to_csv(f"{results_dir}/mape.csv", index = False)
+        
+        # Calculate the optimization metric
+        avg_mape = np.mean(mape)
+        avg_corr = np.mean(corr)
+
+        # Return the optimization objective (minimize MAPE, maximize correlation)
+        trial.set_user_attr("avg_corr", avg_corr)  # Optional: log additional metrics
+        return avg_mape
     
-    study = optuna.create_study(direction= "minimize")#à remplacer par cfg. qqchose une fois que c'est compris + gerer direction = ['minimize','maximize']
-    study.optimize(lambda trial: objective(trial, cfg, mape, corr), n_trials=1)#pareil
+    study = optuna.create_study(direction="minimize")  # Change to "maximize" if optimizing correlation
+    study.optimize(objective, n_trials=cfg.optuna.n_trials)
 
-    # Print the best trial
-    print("Optuna Study Results:")
-    print(f"Best Trial Number: {study.best_trial.number}")
-    print(f"Best Value: {study.best_value}")
-    print("Best Parameters:")
-    for key, value in study.best_trial.params.items():
-        print(f"  {key}: {value}")
-
-    # Save study results
-    results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
-    os.makedirs(results_dir, exist_ok=True)
-
-    with open(f"{results_dir}/optuna_results.txt", "w") as f:
-        f.write("Optuna Study Results:\n")
-        f.write(f"Best Trial Number: {study.best_trial.number}\n")
-        f.write(f"Best Value: {study.best_value}\n")
-        f.write("Best Parameters:\n")
-        for key, value in study.best_trial.params.items():
-            f.write(f"  {key}: {value}\n")
-
-    # Save the study object for later use
-    with open(f"{results_dir}/optuna_study.pkl", "wb") as f:
-        pickle.dump(study, f)
+    # Log best trial
+    print("Best trial:")
+    print(f"  Value: {study.best_value}")
+    print(f"  Params: {study.best_params}")
+    print(f"  Additional metrics: {study.best_trial.user_attrs}")
         
         
-    prediction_metrics = predictions[0]
-    for prediction in predictions[1:]:
-        prediction_metrics.update(prediction)
-
-    pred_results = []
-    for k, v in prediction_metrics.items():
-        true_targets, predicted_targets, indices = v
-        
-        true_targets_dict = {"train_ratio": [k[0]] * len(true_targets),
-                             "model_run":[k[1]] * len(true_targets),
-                             "dataset":[k[2]] * len(true_targets)
-                            }
-        predicted_targets_dict = {"indices": indices}
-        
-        for i, target in enumerate(targets):
-            true_targets_dict[target] = true_targets[:, i]
-            predicted_targets_dict[f"{target}_pred"] = predicted_targets[:, i]
-            
-            
-        true_targets = pd.DataFrame(true_targets_dict)
-        predicted_targets = pd.DataFrame(predicted_targets_dict)
-        
-        pred_results.append(pd.concat([true_targets, predicted_targets], axis = 1))
-    pred_results = pd.concat(pred_results)
-    pred_results.to_csv(f"{results_dir}/pred_results.csv", index=False)
-
-    prediction_mape_by_element = []
-    for k, v in prediction_metrics.items():
-        true_targets, predicted_targets, indices = v
-        
-        mape_by_element = np.abs(true_targets - predicted_targets) / (np.abs(true_targets)+1e-10)
-        
-        for i, mape in enumerate(mape_by_element):
-            prediction_mape_by_element.append(
-                {
-                    'train_ratio': k[0],
-                    'model_run': k[1],
-                    'dataset': k[2],
-                    'mape': mape
-                }
-            )
-
-    df = pd.DataFrame(prediction_mape_by_element)
-    df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-    df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
-    df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
-    df.to_csv(f"{results_dir}/mape.csv", index = False)
 
 if __name__ == "__main__":
     main()

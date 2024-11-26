@@ -2,28 +2,41 @@ defaults:
   - override hydra/sweeper: optuna
   - override hydra/sweeper/sampler: random
 
-hydra:
-  sweeper:
-    sampler:
-      _target_: optuna.samplers.RandomSampler
-      seed: 123
-    storage: null  # Can be set to a database URL if persistence is needed
-    study_name: "test_main_model_optuna"
-    n_trials: 1
-    n_jobs: 1  # Number of parallel jobs for trial execution
-    direction: ["minimize", "maximize"]  # First objective (MAPE) minimized, second (Correlation) maximized
-    params:
-      lr: tag(log, interval(1e-5, 1e-2))
-      output_dim_target: choice(128, 256, 512)
-      hidden_dim: choice(50, 100, 200)
-      batch_size: choice(32, 64, 128)
-      weight_decay: tag(log, interval(1e-6, 1e-3))
-      dropout_rate: tag(uniform, interval(0.0, 0.5))
-      # pft_base_temperature: tag(uniform, interval(0.01, 1.0))
-      # pft_temperature: ${pft_base_temperature}
-      # ptt_base_temperature: tag(uniform, interval(0.01, 1.0))
-      # ptt_temperature: ${ptt_base_temperature}
-      reg_term: tag(log, interval(1e-4, 1e-1))
+# hydra:
+#   sweeper:
+#     sampler:
+#       _target_: optuna.samplers.RandomSampler
+#       seed: 123
+#     storage: null  # Can be set to a database URL if persistence is needed
+#     study_name: "test_main_model_optuna"
+#     n_trials: 1
+#     n_jobs: 1  # Number of parallel jobs for trial execution
+#     direction: ["minimize", "maximize"]  # First objective (MAPE) minimized, second (Correlation) maximized
+#     params:
+#       lr: tag(log, interval(1e-5, 1e-2))
+#       output_dim_target: choice(128, 256, 512)
+#       hidden_dim: choice(50, 100, 200)
+#       batch_size: choice(32, 64, 128)
+#       weight_decay: tag(log, interval(1e-6, 1e-3))
+#       dropout_rate: tag(uniform, interval(0.0, 0.5))
+#       # pft_base_temperature: tag(uniform, interval(0.01, 1.0))
+#       # pft_temperature: ${pft_base_temperature}
+#       # ptt_base_temperature: tag(uniform, interval(0.01, 1.0))
+#       # ptt_temperature: ${ptt_base_temperature}
+#       reg_term: tag(log, interval(1e-4, 1e-1))
+optuna :
+  search_space:
+    lr: tag(log, interval(1e-5, 1e-2))
+    output_dim_target: choice(128, 256, 512)
+    hidden_dim: choice(50, 100, 200)
+    batch_size: choice(32, 64, 128)
+    weight_decay: tag(log, interval(1e-6, 1e-3))
+    dropout_rate: tag(uniform, interval(0.0, 0.5))
+    reg_term: tag(log, interval(1e-4, 1e-1))
+  n_trials : 1
+  _target_: optuna.samplers.RandomSampler
+  direction : 'minimize'
+
 
 # config.yaml
 project: "PhenProj with MatAe pretrained | CamCan | test"
