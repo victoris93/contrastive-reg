@@ -687,9 +687,9 @@ def main(cfg: DictConfig):
 
         # Return the optimization objective (minimize MAPE, maximize correlation)
         trial.set_user_attr("avg_corr", avg_corr)  # Optional: log additional metrics
-        return avg_mape
+        return avg_mape, - avg_corr
     
-    study = optuna.create_study(direction="minimize")  # Change to "maximize" if optimizing correlation
+    study = optuna.create_study(directions=["minimize", "maximize"])  # Change to "maximize" if optimizing correlation
     study.optimize(objective, n_trials=cfg.optuna.n_trials)
 
     # Log best trial
