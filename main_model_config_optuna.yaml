@@ -33,7 +33,7 @@ optuna :
     weight_decay: tag(log, interval(1e-6, 1e-3))
     dropout_rate: tag(uniform, interval(0.0, 0.5))
     reg_term: tag(log, interval(1e-4, 1e-1))
-  n_trials : 1
+  n_trials : 50
   _target_: optuna.samplers.RandomSampler
   direction : 'minimize'
 
@@ -66,7 +66,7 @@ synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 1
+num_epochs: 10
 batch_size: 32
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001 # Add this line to parametrize the learning rate
