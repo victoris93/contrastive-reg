@@ -2,28 +2,6 @@ defaults:
   - override hydra/sweeper: optuna
   - override hydra/sweeper/sampler: random
 
-# hydra:
-#   sweeper:
-#     sampler:
-#       _target_: optuna.samplers.RandomSampler
-#       seed: 123
-#     storage: null  # Can be set to a database URL if persistence is needed
-#     study_name: "test_main_model_optuna"
-#     n_trials: 1
-#     n_jobs: 1  # Number of parallel jobs for trial execution
-#     direction: ["minimize", "maximize"]  # First objective (MAPE) minimized, second (Correlation) maximized
-#     params:
-#       lr: tag(log, interval(1e-5, 1e-2))
-#       output_dim_target: choice(128, 256, 512)
-#       hidden_dim: choice(50, 100, 200)
-#       batch_size: choice(32, 64, 128)
-#       weight_decay: tag(log, interval(1e-6, 1e-3))
-#       dropout_rate: tag(uniform, interval(0.0, 0.5))
-#       # pft_base_temperature: tag(uniform, interval(0.01, 1.0))
-#       # pft_temperature: ${pft_base_temperature}
-#       # ptt_base_temperature: tag(uniform, interval(0.01, 1.0))
-#       # ptt_temperature: ${ptt_base_temperature}
-#       reg_term: tag(log, interval(1e-4, 1e-1))
 optuna :
   search_space:
     lr: tag(log, interval(1e-5, 1e-2))
@@ -33,9 +11,9 @@ optuna :
     weight_decay: tag(log, interval(1e-6, 1e-3))
     dropout_rate: tag(uniform, interval(0.0, 0.5))
     reg_term: tag(log, interval(1e-4, 1e-1))
-  n_trials : 50
+  n_trials : 10
   _target_: optuna.samplers.RandomSampler
-  direction : 'minimize'
+  direction : 'maximize'
 
 
 # config.yaml
@@ -66,7 +44,7 @@ synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 10
+num_epochs: 100
 batch_size: 32
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001 # Add this line to parametrize the learning rate

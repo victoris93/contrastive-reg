@@ -20,6 +20,7 @@ from scipy.stats import spearmanr
 from sklearn.model_selection import (
     train_test_split,
 )
+import yaml
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 from ContModeling.augmentations import augs, aug_args
@@ -687,16 +688,23 @@ def main(cfg: DictConfig):
 
         # Return the optimization objective (minimize MAPE, maximize correlation)
         trial.set_user_attr("avg_corr", avg_corr)  # Optional: log additional metrics
-        return avg_mape, avg_corr
+        return avg_corr
     
-    study = optuna.create_study(directions=["minimize", "maximize"])  # Change to "maximize" if optimizing correlation
+    study = optuna.create_study(direction="maximize")  # Change to "maximize" if optimizing correlation
     study.optimize(objective, n_trials=cfg.optuna.n_trials)
 
-    print("Pareto Front Trials:")
-    for i, trial in enumerate(study.best_trials):
-        print(f"Trial {i}:")
-        print(f"  Values (MAPE, Correlation): {trial.values}")  # Multi-objective values
-        print(f"  Params: {trial.params}")
+    best_trials = study.best_trials
+
+    # Directory to save configurations
+    best_configs_dir = os.path.join(results_dir, "best_configs")
+    os.makedirs(best_configs_dir, exist_ok=True)
+
+    for i, trial in enumerate(best_trials):
+        best_config_path = os.path.join(best_configs_dir, f"best_config_trial_{i}.yaml")
+        with open(best_config_path, "w") as f:
+            yaml.dump(trial.params, f, default_flow_style=False)
+
+    print(f"Best configurations saved in {best_configs_dir}")
         
         
 

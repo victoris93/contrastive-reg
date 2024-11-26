@@ -27,7 +27,7 @@ synth_exp: False
 multi_gpu: True
 num_epochs: 100
 batch_size: 32
-n_runs: 10 # set 1 if some part of the model is pretrained (the test set should be the same)
+n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.00289
 weight_decay: 1.71356e-05
 dropout_rate: 0.1653
