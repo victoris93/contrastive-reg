@@ -1,6 +1,6 @@
 defaults:
   - override hydra/sweeper: optuna
-  - override hydra/sweeper/sampler: random
+  - override hydra/sweeper/sampler: tpe
 
 optuna :
   search_space:
@@ -12,13 +12,13 @@ optuna :
     dropout_rate: tag(uniform, interval(0.0, 0.5))
     reg_term: tag(log, interval(1e-4, 1e-1))
   n_trials : 10
-  _target_: optuna.samplers.RandomSampler
-  direction : 'maximize'
+  _target_: optuna.samplers.TPESampler
+  direction : 'minimize'
 
 
 # config.yaml
 project: "PhenProj with MatAe pretrained | CamCan | test"
-experiment_name:  "test model optuna"
+experiment_name:  "test model optuna nwith norm"
 hypothesis: "-"
 
 # Model dimensions
@@ -44,7 +44,7 @@ synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 100
+num_epochs: 50
 batch_size: 32
 n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
 lr: 0.001 # Add this line to parametrize the learning rate

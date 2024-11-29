@@ -20,3 +20,4 @@ dataset_400parcels_2.nc
 dataset_400parcels_2.zip
 dataset_400parcels.nc
 *.nc
+*.png

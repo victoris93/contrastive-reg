@@ -27,7 +27,7 @@ from sklearn.model_selection import (
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
-from augmentations import augs, aug_args
+from contrastive_phenotypes.src.ContModeling.augmentations import augs, aug_args
 import glob, os, shutil
 from nilearn.datasets import fetch_atlas_schaefer_2018
 import random

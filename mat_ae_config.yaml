@@ -1,10 +1,10 @@
 project: "Pretrain mat AE CamCan"
-experiment_name: "pretraining mat ae for test"
+experiment_name: "pretraining mat ae with 200 samples"
 
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 1
+num_epochs: 200
 batch_size: 64
 kfolds: 5
 lr: 0.001
@@ -30,7 +30,7 @@ skip_enc1: False
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 70
+output_dim_feat: 200
 input_type: "matrices" # Options: matrices, targets
 
 # Loss function and optimizer
@@ -40,7 +40,7 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 best_fold: 1
 
 # Paths for data
-dataset_path: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/dataset_400parcels_2.nc"
+dataset_path: "/data/parietal/store2/work/mrenaudi/contrastive-reg-3/new_dataset_200_subjects.nc"
 targets:
     - age
 

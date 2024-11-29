@@ -225,12 +225,13 @@ class ModelRun(submitit.helpers.Checkpointable):
                     
                     save_embeddings(X_embedded, "mat", cfg, is_test, run)
                     save_embeddings(X_emb_reduced, "joint", cfg, is_test, run)
-
+                    
                     if label == 'test':
                         epsilon = 1e-8
                         mape =  100 * torch.mean(torch.abs(y - y_pred) / torch.abs((y + epsilon))).item()
                         corr =  spearmanr(y.cpu().numpy().flatten(), y_pred.cpu().numpy().flatten())[0]
-
+                        norm = torch.norm(torch.abs(y-y_pred))
+                            
                         wandb.log({
                             'Run': run,
                             'Test | Target MAPE/val' : mape,
@@ -247,7 +248,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                         })
             wandb.finish()
             
-            self.results = (losses, predictions, self.embeddings, mape, corr)
+            self.results = (losses, predictions, self.embeddings, norm)
 
         if save_model:
             saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
@@ -632,7 +633,7 @@ def main(cfg: DictConfig):
                 job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
                 run_results.append(job)
 
-        losses, predictions, embeddings, mape, corr = zip(*run_results)
+        losses, predictions, embeddings, norm = zip(*run_results)
         
         prediction_metrics = predictions[0]
         for prediction in predictions[1:]:
@@ -682,15 +683,10 @@ def main(cfg: DictConfig):
         df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
         df.to_csv(f"{results_dir}/mape.csv", index = False)
         
-        # Calculate the optimization metric
-        avg_mape = np.mean(mape)
-        avg_corr = np.mean(corr)
 
-        # Return the optimization objective (minimize MAPE, maximize correlation)
-        trial.set_user_attr("avg_corr", avg_corr)  # Optional: log additional metrics
-        return avg_corr
+        return norm
     
-    study = optuna.create_study(direction="maximize")  # Change to "maximize" if optimizing correlation
+    study = optuna.create_study(direction="minimize")  # Change to "maximize" if optimizing correlation
     study.optimize(objective, n_trials=cfg.optuna.n_trials)
 
     best_trials = study.best_trials
