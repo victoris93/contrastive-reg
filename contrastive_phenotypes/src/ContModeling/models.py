@@ -52,7 +52,12 @@ class PhenoProj(nn.Module):
             nn.BatchNorm1d(hidden_dim),
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
-            
+
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.BatchNorm1d(hidden_dim),
+            # nn.ELU(),
+            # nn.Dropout(p=dropout_rate),
+
             nn.Linear(hidden_dim, output_dim_target)
             
         ) # we need to be able to invert this

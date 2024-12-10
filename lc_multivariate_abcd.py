@@ -82,6 +82,10 @@ class ModelRun(submitit.helpers.Checkpointable):
                 print("Loading test indices from the pretraining experiment...")
                 test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
                 train_indices = np.setdiff1d(indices, test_indices)
+                if train_ratio < 1.0:
+                    train_size = int(len(train_indices) * train_ratio)
+                    train_indices = random_state.choice(train_indices, train_size, replace=False)
+
             elif cfg.external_test_mode:
                 test_scanners = list(cfg.test_scanners)
                 xr_dataset = xr.open_dataset(cfg.dataset_path)
@@ -89,7 +93,11 @@ class ModelRun(submitit.helpers.Checkpointable):
                                     axis = 0).astype(bool)
                 test_indices = indices[scanner_mask]
                 train_indices = indices[~scanner_mask]
+                if train_ratio < 1.0:
+                    train_size = int(len(train_indices) * train_ratio)
+                    train_indices = random_state.choice(train_indices, train_size, replace=False)
                 del xr_dataset
+
             else:
                 run_indices = random_state.choice(indices, run_size, replace=False)
                 train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
@@ -482,12 +490,9 @@ def main(cfg: DictConfig):
         log_folder = Path("logs")
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
-            timeout_min=120,
-            slurm_partition="gpu_short",
-            gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1
-            #slurm_constraint="v100-32g",
+            timeout_min=180,
+            slurm_partition="gpu",
+            slurm_gres=f'gpu:1',
         )
         run_jobs = []
 
