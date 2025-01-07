@@ -37,7 +37,7 @@ class PhenoProj(nn.Module):
 
         A = np.random.rand(output_dim_feat, output_dim_feat)
         A = (A + A.T) / 2
-        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A, discard_diagonal = True))
+        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))
 
         self.init_weights(self.target_ae.encode_target)
         self.init_weights(self.target_ae.decode_target)
