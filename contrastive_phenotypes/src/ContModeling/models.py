@@ -53,16 +53,38 @@ class PhenoProj(nn.Module):
             nn.ELU(),
             nn.Dropout(p=dropout_rate),
 
-            # nn.Linear(hidden_dim, hidden_dim),
-            # nn.BatchNorm1d(hidden_dim),
-            # nn.ELU(),
-            # nn.Dropout(p=dropout_rate),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
 
             nn.Linear(hidden_dim, output_dim_target)
             
         ) # we need to be able to invert this
         
         self.init_weights(self.feat_to_target_embedding)
+        
+        self.target_to_feat_embedding = nn.Sequential(
+            nn.Linear(output_dim_target, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, self.vectorized_feat_emb_dim)
+            
+        )
+
+        self.init_weights(self.target_to_feat_embedding)
 
     def init_weights(self, layer):
         if isinstance(layer, nn.Linear):
@@ -85,6 +107,9 @@ class PhenoProj(nn.Module):
         feat_embedding_transfer = self.feat_to_target_embedding(feat_embedding)
         # feat_embedding_transfer = nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
         return feat_embedding_transfer, nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
+
+    def inv_embedding(self, feat_embedding_transfer): # invert the embedding from target space to feature space to reconstruct the matrix
+        return self.target_to_feat_embedding(feat_embedding_transfer)
         
     def forward(self, x, y):
         x_embedding = self.encode_features(x)
