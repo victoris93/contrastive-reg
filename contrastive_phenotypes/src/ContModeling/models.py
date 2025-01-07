@@ -83,9 +83,9 @@ class PhenoProj(nn.Module):
     
     def transfer_embedding(self, feat_embedding): # note that the feat embedding was vectorized
         feat_embedding_transfer = self.feat_to_target_embedding(feat_embedding)
-        feat_embedding_transfer = nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
-        return feat_embedding_transfer
-
+        # feat_embedding_transfer = nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
+        return feat_embedding_transfer, nn.functional.normalize(feat_embedding_transfer, p=2, dim=1)
+        
     def forward(self, x, y):
         x_embedding = self.encode_features(x)
         y_embedding = self.encode_targets(y)
@@ -196,3 +196,4 @@ class ReEig(nn.Module):
         X_rectified = V @ torch.diag_embed(D) @ V.transpose(-2, -1)
         
         return X_rectified
+
