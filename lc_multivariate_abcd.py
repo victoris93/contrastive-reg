@@ -185,13 +185,13 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X_embedded = model.encode_features(X)
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
-                    X_emb_reduced, X_emb_reduced_norm = model.transfer_embedding(X_embedded).to(device)
+                    X_emb_reduced, X_emb_reduced_norm = model.transfer_embedding(X_embedded)
                     
                     if label == 'test' and train_ratio == 1.0:
                         np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
                         inv_feat_embedding = model.inv_embedding(X_emb_reduced).detach().cpu().numpy()
                         inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
-                        inv_feat_embedding = torch.tensor(inv_feat_embedding).to(device)
+                        inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
                         recon_mat = model.decode_features(inv_feat_embedding)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         
@@ -338,15 +338,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 
                 ## REDUCED FEAT TO TARGET EMBEDDING
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy())
-                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
+                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(torch.float32).to(device)
 
                 features_vectorized = sym_matrix_to_vec(features.detach().cpu().numpy())
-                features_vectorized = torch.tensor(features_vectorized).to(device)
+                features_vectorized = torch.tensor(features_vectorized).to(torch.float32).to(device)
 
                 ## KERNLIZED LOSS: MAT embedding vs MAT
-                kernel_embedded_feature_loss, direction_reg_features = criterion_pft(embedded_feat_vectorized.unsqueeze(1), features_vectorized)
-                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
-                direction_reg_features = 100 * direction_reg_features
+                # kernel_embedded_feature_loss, direction_reg_features = criterion_pft(embedded_feat_vectorized.unsqueeze(1), features_vectorized)
+                # kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
+                # direction_reg_features = 100 * direction_reg_features
 
                 ## TARGET DECODING FROM MAT EMBEDDING
                 reduced_feat_embedding, reduced_feat_embedding_norm = model.transfer_embedding(embedded_feat_vectorized)
@@ -354,10 +354,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 if not cfg.mat_ae_pretrained:
                     inv_feat_embedding = model.inv_embedding(reduced_feat_embedding).detach().cpu().numpy()
                     inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
-                    inv_feat_embedding = torch.tensor(inv_feat_embedding).to(device)
+                    inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
                     reconstructed_feat = model.decode_features(inv_feat_embedding)
                     ## FEATURE DECODING LOSS
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
+                    # reduced_feat_loss = feature_autoencoder_crit(embedded_feat, inv_feat_embedding) / 10_000
                     
                 out_target_decoded = model.decode_targets(reduced_feat_embedding_norm)
 
@@ -374,11 +375,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_target_loss + kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
+                loss = kernel_embedded_target_loss + target_decoding_from_reduced_emb_loss
                 # print(kernel_embedded_target_loss, kernel_embedded_target_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
                     loss += feature_autoencoder_loss
+                    # loss += reduced_feat_loss
 
                 loss.backward()
 
@@ -397,16 +399,16 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 loss_terms_batch['loss'] = loss.item() / len(features)
                 loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
-                loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(features)
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
-                loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
-                loss_terms_batch['direction_reg_features_loss'] = direction_reg_features.item() / len(features)
+                # loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
                 
                 if not cfg.mat_ae_pretrained:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
+                    # loss_terms_batch['reduced_feat_loss'] = reduced_feat_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
-                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
+                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
+                        # 'reduced_feat_loss': loss_terms_batch['reduced_feat_loss']
                     })
                 
                 wandb.log({
@@ -414,9 +416,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
                     'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
-                    'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
-                    'direction_reg_target_loss': loss_terms_batch['direction_reg_target_loss'],
-                    'direction_reg_features_loss': loss_terms_batch['direction_reg_features_loss'],
+                    # 'direction_reg_target_loss': loss_terms_batch['direction_reg_target_loss'],
+                    # 'direction_reg_features_loss': loss_terms_batch['direction_reg_features_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 
@@ -432,7 +433,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     features, targets = features.to(device), targets.to(device)                    
                     out_feat = model.encode_features(features)
                     
-                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy())).float().to(device)
+                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy())).to(torch.float32).to(device)
                     transfer_out_feat, transfer_out_feat_norm = model.transfer_embedding(out_feat)
                     out_target_decoded = model.decode_targets(transfer_out_feat_norm)
                     

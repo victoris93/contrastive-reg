@@ -178,7 +178,7 @@ class KernelizedSupCon(nn.Module):
 
         loss = -(self.temperature / self.base_temperature) * log_prob
 
-        return loss.mean() + direction_reg.mean(), direction_reg.mean()
+        return loss.mean(), direction_reg.mean()
 
 
 class OutlierRobustMSE(nn.Module):

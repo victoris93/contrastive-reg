@@ -1,14 +1,11 @@
 #!/bin/bash 
 #SBATCH --job-name=LCurve
 #SBATCH -o ./logs/LCurve-%j.out
-#SBATCH -p gpu_short
+#SBATCH -p gpu
 #SBATCH --gpus-per-node 1
 
-module load Python/3.11.3-GCCcore-12.3.0
-source /well/margulies/users/cpy397/python/neuro/bin/activate
+conda activate neuro
 echo the job id is $SLURM_JOB_ID
-var='pea_wiscv_trs'
+
 export HYDRA_FULL_ERROR=1
-python3 -u lc_multivariate_abcd.py \
-    experiment_name="${var}_ext_exp" \
-    targets=$var \
+python3 -u lc_multivariate_abcd.py
