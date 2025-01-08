@@ -1,10 +1,10 @@
-project: "20_runs_PhenProj"
-experiment_name: "abs_abcd_cog_20_runs_ext"
+project: "PhenProj"
+experiment_name: "inv_embed"
 hypothesis: "-"
 
-hydra:
-  run:
-    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+# hydra:
+#   run:
+#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 # Model dimensions
 input_dim_feat: 400
@@ -30,13 +30,13 @@ synth_exp: False
 multi_gpu: True
 num_epochs: 100
 batch_size: 128
-n_runs: 20
+n_runs: 1
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio: 0.3 # makes no difference if some part of the model is pretrained or external test mode
-train_ratio: [0.1, 0.3, 0.5, 0.7, 1.0] # multiple values for a learning curve
+train_ratio: 1.0 # multiple values for a learning curve
 log_gradients: True
 clip_grad: True
 
@@ -73,7 +73,7 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
 targets:
     # - pea_wiscv_tss
     # - nihtbx_picvocab_agecorrected
@@ -114,8 +114,8 @@ targets:
 standardize_targets: False
 
 # Directory for saving results
-work_dir: "/data/parietal/store/work/vshevche/"
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
 embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/data/parietal/store/work/vshevche/results"
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
