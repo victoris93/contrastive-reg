@@ -1,17 +1,13 @@
 project: "PhenProj"
-experiment_name: "inv_embed"
+experiment_name: "inv_embed_ext"
 hypothesis: "-"
-
-hydra:
-  run:
-    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 100
-hidden_dim: 100
+output_dim_feat: 128
+hidden_dim: 128
 input_dim_target: 1
-output_dim_target: 50
+output_dim_target: 64
 
 # MatAutoencoder options
 skip_enc1: False
@@ -41,7 +37,7 @@ log_gradients: True
 clip_grad: True
 
 # test options
-external_test_mode: True # relevant if no part of the model is pretrained
+external_test_mode: False # relevant if no part of the model is pretrained
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -73,7 +69,7 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
 targets:
     # - pea_wiscv_tss
     # - nihtbx_picvocab_agecorrected
@@ -114,8 +110,8 @@ targets:
 standardize_targets: False
 
 # Directory for saving results
-work_dir: "/data/parietal/store/work/vshevche/"
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
 embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/data/parietal/store/work/vshevche/results"
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
