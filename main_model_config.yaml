@@ -73,7 +73,7 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
 targets:
     # - pea_wiscv_tss
     # - nihtbx_picvocab_agecorrected
@@ -114,8 +114,8 @@ targets:
 standardize_targets: False
 
 # Directory for saving results
-work_dir: "/data/parietal/store/work/vshevche/"
+work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
 embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/data/parietal/store/work/vshevche/results"
+output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
