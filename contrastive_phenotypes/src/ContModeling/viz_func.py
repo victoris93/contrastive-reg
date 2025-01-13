@@ -112,14 +112,16 @@ def compute_batch_elementwise_correlation(true, recon):
     return correlations
 
 
-def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
+def load_recon_mats(exp_name, work_dir, vectorize, is_full_model=False, reduced_mat=False, run_num=None):
     recon_path_suffix = ""
     if is_full_model:
         recon_path_suffix = f"_run{run_num}"
-
+    mat_type_suffix = "recon_"
+    mat_type_suffix = mat_type_suffix + "reduced_mat" if reduced_mat else mat_type_suffix + "mat"
+    
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    recon_mat_files = [file for file in os.listdir(recon_mat_dir) if f"recon_mat" in file and recon_path_suffix in file]
+    recon_mat_files = [file for file in os.listdir(recon_mat_dir) if mat_type_suffix in file and recon_path_suffix in file]
     recon_mat_files = sorted(recon_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
@@ -131,10 +133,11 @@ def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_nu
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(data_path, exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
+def load_true_mats(data_path, exp_name, work_dir, vectorize=False, is_full_model=False, run_num=None):
     recon_path_suffix = ""
     if is_full_model:
         recon_path_suffix = f"_run{run_num}"
+    mat_type_suffix = "recon_"
 
     test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)

@@ -12,12 +12,11 @@ import torch.nn.functional as F
 from pathlib import Path
 from scipy.stats import pearsonr, spearmanr
 
-
 def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
     embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
     os.makedirs(embedding_dir, exist_ok=True)
     embedding_numpy = embedding.cpu().detach().numpy()
-    emb_type = emb_type + '_' # either "mat", "target" or "joint"
+    emb_type = emb_type + '_'
 
     if batch is None:
         batch_suffix = ''
