@@ -1,11 +1,11 @@
-project: "PretrainMatAE_ABCD"
-experiment_name: "synth_external_mat_ae_abcd"
+project: "PretrainMatAE"
+experiment_name: "ext_reduced_mat_ae_abcd"
 
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
 num_epochs: 100
-batch_size: 64
+batch_size: 128
 kfolds: 5
 lr: 0.001
 weight_decay: 0
@@ -30,7 +30,8 @@ skip_enc1: False
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 70
+hidden_dim : 100
+output_dim_feat: 100
 input_type: "matrices" # Options: matrices, targets
 
 # Loss function and optimizer
@@ -40,9 +41,9 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 best_fold: 1
 
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
+dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
 targets:
-    - pea_wiscv_trs
+    - pea_wiscv_trs # makes no difference, no downstream task
 
 # Directory for saving results
 work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
