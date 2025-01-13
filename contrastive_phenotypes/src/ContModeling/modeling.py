@@ -30,7 +30,7 @@ from geoopt.optim import RiemannianAdam
 import sys
 from .utils import mape_between_subjects, mean_correlations_between_subjects, save_embeddings
 from .losses import LogEuclideanLoss, NormLoss
-from .models import MatAutoEncoder, TargetAutoEncoder
+from .models import MatAutoEncoder, ReducedMatAutoEncoder, TargetAutoEncoder
 from .viz_func import load_mape, load_recon_mats, load_true_mats, wandb_plot_test_recon_corr, wandb_plot_individual_recon
 from .helper_classes import MatData
 
@@ -153,7 +153,124 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
     wandb.finish()
     print(loss_terms)
     
-    return loss_terms, model.state_dict(), val_loss.item()
+    return loss_terms, model.state_dict(), val_loss.item()    
+
+def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, device, model=None):
+    wandb.init(project=cfg.project,
+       mode = "offline",
+       name=cfg.experiment_name,
+       dir = cfg.output_dir)
+    wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
+    
+    input_dim_feat = cfg.input_dim_feat
+    output_dim_feat = cfg.output_dim_feat
+    batch_size = cfg.batch_size
+    lr = cfg.lr
+    weight_decay = cfg.weight_decay
+    dropout_rate = cfg.dropout_rate
+    num_epochs = cfg.num_epochs
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    if model is None:
+        model = ReducedMatAutoEncoder(
+            input_dim_feat,
+            hidden_dim,
+            output_dim_target,
+            dropout_rate,
+            cfg
+        ).to(device)
+
+    if cfg.loss_function == 'LogEuclidean':
+        criterion = LogEuclideanLoss()
+        optimizer_autoencoder = RiemannianAdam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    elif cfg.loss_function == 'Norm':
+        criterion = NormLoss()
+        optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    elif cfg.loss_function == 'MSE':
+        criterion = nn.functional.mse_loss
+        optimizer_autoencoder = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
+    else:
+        raise ValueError("Unsupported loss function specified in config")
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer_autoencoder,
+                                                     factor=0.1,
+                                                     patience = cfg.scheduler_patience)
+    
+    loss_terms = []
+        
+    model.train()
+    with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
+        for epoch in pbar:
+            batch = 1
+            loss_terms_batch = defaultdict(lambda:0)
+            for features, _ in train_loader:
+                
+                optimizer_autoencoder.zero_grad()
+                features = features.to(device)
+                
+                embedded_feat = model.encode_feat(features)
+                reconstructed_feat = model.decode_feat(embedded_feat)
+                
+                loss = criterion(features,reconstructed_feat)
+                loss.backward()
+                        
+                if cfg.clip_grad:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                if cfg.log_gradients:
+                    for name, param in model.named_parameters():
+                        wandb.log({
+                            "Epoch": epoch,
+                            "Batch": batch,
+                            f"Gradient Norm/{name}": param.grad.norm().item()
+                            })
+                        
+                optimizer_autoencoder.step()
+                loss_terms_batch['loss'] += loss.item() / len(train_loader)
+                batch += 1
+                
+            model.eval()
+            val_loss = 0
+            val_mean_corr = 0
+            val_mape = 0
+
+            with torch.no_grad():
+                for features, _ in val_loader:
+                    features = features.to(device)
+
+                    embedded_feat = model.encode_feat(features)
+                    save_embeddings(embedded_feat, "mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
+                    reconstructed_feat = model.decode_feat(embedded_feat)
+                    
+                    val_loss += criterion(features, reconstructed_feat)
+                    val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
+                    val_mape += mape_between_subjects(features, reconstructed_feat).item()
+
+            val_loss /= len(val_loader)
+            val_mean_corr /= len(val_loader)
+            val_mape /= len(val_loader)
+            
+            wandb.log({
+                "Fold" : fold,
+                "Epoch" : epoch,
+                "Loss/val" : val_loss.item(),
+                "Metric/val_mean_corr" : val_mean_corr,
+                "Metric/val_mape" : val_mape
+            })
+            
+            loss_terms.append(('Validation', val_loss.item(), val_mean_corr, val_mape))
+            
+            scheduler.step(val_loss)
+            if np.log10(scheduler._last_lr[0]) < -4:
+                break
+
+            pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
+            
+    wandb.finish()
+    print(loss_terms)
+    
+    return loss_terms, model.state_dict(), val_loss.item()    
+
 
 def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, model=None):
 

@@ -28,12 +28,14 @@ class PhenoProj(nn.Module):
                                         output_dim_feat,
                                         dropout_rate,
                                         cfg)
+        # self.reduced_matrix_ae
         
         self.target_ae = TargetAutoEncoder(input_dim_target,
                                            hidden_dim,
                                            output_dim_target,
                                            dropout_rate,
                                            cfg)
+        
 
         A = np.random.rand(output_dim_feat, output_dim_feat)
         A = (A + A.T) / 2
@@ -161,7 +163,78 @@ class MatAutoEncoder(nn.Module):
         
         recon_mat = self.dec_mat2(z_n)
         return recon_mat
+        
+class ReducedMatAutoEncoder(nn.Module):
+    def __init__(
+        self,
+        input_dim_feat,
+        hidden_dim,
+        output_dim_target,
+        dropout_rate,
+        cfg
+    ):
+        super(ReducedMatAutoEncoder, self).__init__()
+        self.cfg = cfg
+        
+        A = np.random.rand(output_dim_feat, output_dim_feat)
+        A = (A + A.T) / 2
+        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))
+        
+        self.reduced_mat_to_embed = nn.Sequential(
+            nn.Linear(self.vectorized_feat_emb_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
 
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, output_dim_target) 
+        )
+        
+        self.init_weights(self.feat_to_target_embedding)
+        
+        self.embed_to_reduced_mat = nn.Sequential(
+            nn.Linear(output_dim_target, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ELU(),
+            nn.Dropout(p=dropout_rate),
+
+            nn.Linear(hidden_dim, self.vectorized_feat_emb_dim)
+        )
+
+        self.init_weights(self.target_to_feat_embedding)
+        
+    def embed_reduced_mat(self, reduced_mat):
+        feat_embedding = self.reduced_mat_to_embed(reduced_mat)
+        feat_embedding_norm = nn.functional.normalize(feat_embedding, p=2, dim=1)
+        return feat_embedding, feat_embedding_norm
+
+    def recon_reduced_mat(self, feat_embedding):
+        recon_reduced_mat = self.embed_to_reduced_mat(feat_embedding)
+        return recon_reduced_mat
+
+    def forward(sef, reduced_mat):
+        feat_embedding, feat_embedding_norm = self.reduced_mat_to_embed(reduced_mat)
+        recon_reduced_mat = self.recon_reduced_mat(feat_embedding)
+        return recon_reduced_mat
 
 class TargetAutoEncoder(nn.Module):
     def __init__(
