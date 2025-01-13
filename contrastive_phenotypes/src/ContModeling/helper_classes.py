@@ -66,13 +66,16 @@ class FoldTrain(submitit.helpers.Checkpointable):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, synth_exp, threshold=0):
+    def __init__(self, dataset_path, target_names, synth_exp=False, reduced_mat=False, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
         self.threshold = threshold
         self.data_array = xr.open_dataset(dataset_path)
-        self.matrices = self.data_array.matrices.values.astype(np.float32)
+        if reduced_mat:
+            self.matrices = self.data_array.reduced_matrices.values.astype(np.float32)
+        else:
+            self.matrices = self.data_array.matrices.values.astype(np.float32)
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
 
         if threshold > 0:
