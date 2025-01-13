@@ -208,10 +208,10 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI,
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
                 
-                embedded_feat = model.encode_feat(features)
-                reconstructed_feat = model.decode_feat(embedded_feat)
+                embedding = model.embed_reduced_mat(features)
+                reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
                 
-                loss = criterion(features,reconstructed_feat)
+                loss = criterion(features, reconstructed_reduced_mat)
                 loss.backward()
                         
                 if cfg.clip_grad:
@@ -238,13 +238,14 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI,
                 for features, _ in val_loader:
                     features = features.to(device)
 
-                    embedded_feat = model.encode_feat(features)
-                    save_embeddings(embedded_feat, "mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
-                    reconstructed_feat = model.decode_feat(embedded_feat)
+                    embedding = model.embed_reduced_mat(features)
+                    save_embeddings(embedding, "reduced_mat_emb", test = False, cfg = cfg, fold = fold, epoch = epoch)
+                    reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
+                    save_embeddings(reconstructed_reduced_mat, "recon_reduced_mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
                     
-                    val_loss += criterion(features, reconstructed_feat)
-                    val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
-                    val_mape += mape_between_subjects(features, reconstructed_feat).item()
+                    val_loss += criterion(features, reconstructed_reduced_mat)
+                    val_mean_corr += mean_correlations_between_subjects(features, reconstructed_reduced_mat)
+                    val_mape += mape_between_subjects(features, reconstructed_reduced_mat).item()
 
             val_loss /= len(val_loader)
             val_mean_corr /= len(val_loader)
@@ -387,7 +388,7 @@ def train_target_autoencoder(fold, train_dataset, val_dataset, cfg, device, mode
     print(loss_terms)
     
     return loss_terms, model.state_dict(), val_loss.item()
-
+    
 def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
     
     wandb.init(project=cfg.project,
@@ -455,6 +456,92 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
         
         recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False)
         true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False)
+        mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
+        test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"
+        test_idx = np.load(test_idx_path)
+
+        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat, true_mat, mape_mat)
+        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, test_idx, recon_mat, true_mat, mape_mat, 0)
+
+        
+    wandb.finish()
+
+            
+    test_loss /= len(test_loader)
+    test_mean_corr /= len(test_loader)
+    test_mape /= len(test_loader)
+    print(f"Test Loss: {test_loss:.02f} | Test Mean Corr: {test_mean_corr:.02f} | Test MAPE: {test_mape:.02f}")
+
+
+def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
+    
+    wandb.init(project=cfg.project,
+        mode = "offline",
+        name=f"TEST_{cfg.experiment_name}",
+        dir = cfg.output_dir,
+        config = OmegaConf.to_container(cfg, resolve=True))
+
+    test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
+    input_dim_feat = cfg.input_dim_feat
+    hidden_dim = cfg.hidden_dim
+    output_dim_feat = cfg.output_dim_feat
+    dropout_rate = cfg.dropout_rate
+
+    model = ReducedMatAutoEncoder(
+            input_dim_feat,
+            hidden_dim,
+            output_dim_feat,
+            dropout_rate,
+            cfg
+            ).to(device)
+    
+    model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}.pth"))
+    
+    model.eval()
+    test_loss = 0
+    test_mean_corr = 0
+    test_mape = 0
+    
+
+    if cfg.loss_function == 'LogEuclidean':
+            criterion = LogEuclideanLoss()
+    elif cfg.loss_function == 'Norm':
+            criterion = NormLoss()
+    elif cfg.loss_function == 'MSE':
+            criterion = nn.functional.mse_loss
+    else:
+        raise ValueError("Unsupported loss function specified in config")
+
+    with torch.no_grad():
+        for i, (features, _) in enumerate(test_loader):
+
+            features = features.to(device)
+
+            embedding = model.embed_reduced_mat(features)
+            reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
+
+            np.save(f'{recon_mat_dir}/recon_reduced_mat_fold{best_fold}_batch_{i+1}', reconstructed_reduced_mat.cpu().numpy())
+            mape_mat = torch.abs((features - reconstructed_reduced_mat) / (features + 1e-10)) * 100
+            np.save(f'{recon_mat_dir}/mape_reduced_mat_fold{best_fold}_batch_{i+1}', mape_mat.cpu().numpy())
+
+            loss = criterion(features, reconstructed_reduced_mat)
+            mean_corr = mean_correlations_between_subjects(features, reconstructed_reduced_mat)
+            mape = mape_between_subjects(features, reconstructed_reduced_mat).item()
+
+            test_loss += loss
+            test_mean_corr += mean_corr
+            test_mape += mape
+
+            wandb.log({
+                'Fold': best_fold,
+                'Test Batch' : i+1,
+                'Test | MAPE' : mape,
+                'Test | Mean Corr' : mean_corr,
+                'Test | Loss': loss,
+                })
+        
+        recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False, True)
+        true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False, False)
         mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
         test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"
         test_idx = np.load(test_idx_path)
