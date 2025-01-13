@@ -484,7 +484,7 @@ def main(cfg: DictConfig):
         
     test_ratio = cfg.test_ratio
 
-    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
+    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, reduced_mat = False, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
