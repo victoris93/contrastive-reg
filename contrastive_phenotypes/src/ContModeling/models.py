@@ -176,7 +176,7 @@ class ReducedMatAutoEncoder(nn.Module):
         super(ReducedMatAutoEncoder, self).__init__()
         self.cfg = cfg
         
-        A = np.random.rand(output_dim_feat, output_dim_feat)
+        A = np.random.rand(input_dim_feat, input_dim_feat)
         A = (A + A.T) / 2
         self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))
         

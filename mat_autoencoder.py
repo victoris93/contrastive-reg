@@ -60,7 +60,7 @@ def main(cfg: DictConfig):
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
     synth_exp = cfg.synth_exp
-    dataset = MatData(dataset_path, targets, synth_exp, threshold=0)
+    dataset = MatData(dataset_path, targets, synth_exp, reduced_mat=False, threshold=0)
     indices = np.arange(len(dataset))
 
     if cfg.external_test_mode: # deserves a separate function in the long run
@@ -89,10 +89,10 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=240,
-            slurm_partition="gpu_short",
+            slurm_partition="gpu",
             gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1
+            # tasks_per_node=1,
+            # nodes=1
         )
         fold_jobs = []
         with executor.batch():
@@ -118,10 +118,10 @@ def main(cfg: DictConfig):
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
     executor.update_parameters(
             timeout_min=240,
-            slurm_partition="gpu_short",
+            slurm_partition="gpu",
             gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1
+            # tasks_per_node=1,
+            # nodes=1
     )
     best_fold = get_best_fold(fold_results)
     job = executor.submit(test_mat_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,

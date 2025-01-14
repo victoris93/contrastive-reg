@@ -41,7 +41,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 
 # +
-@hydra.main(config_path=".", config_name="main_model_config")
+@hydra.main(config_path=".", config_name="mat_autoencoder_config")
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
@@ -60,7 +60,7 @@ def main(cfg: DictConfig):
     dataset_path = cfg.dataset_path
     targets = list(cfg.targets)
     synth_exp = cfg.synth_exp
-    dataset = MatData(dataset_path, targets, synth_exp, True, threshold=0)
+    dataset = MatData(dataset_path, targets, synth_exp, reduced_mat=True, threshold=0)
     indices = np.arange(len(dataset))
 
     if cfg.external_test_mode: # deserves a separate function in the long run
@@ -112,16 +112,16 @@ def main(cfg: DictConfig):
         fold_results = []
         for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
             run_train_fold = FoldTrain()
-            job = run_train_fold(fold, train_mat_autoencoder, train_idx, val_idx, train_val_dataset, model_params_dir=model_params_dir, cfg=cfg, random_state = random_state)
+            job = run_train_fold(fold, train_reduced_mat_autoencoder, train_idx, val_idx, train_val_dataset, model_params_dir=model_params_dir, cfg=cfg, random_state = random_state)
             fold_results.append(job)
     # TEST
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
     executor.update_parameters(
             timeout_min=240,
-            slurm_partition="gpu_short",
+            slurm_partition="gpu",
             gpus_per_node=1,
-            tasks_per_node=1,
-            nodes=1
+            # tasks_per_node=1,
+            # nodes=1
     )
     best_fold = get_best_fold(fold_results)
     job = executor.submit(test_reduced_mat_autoencoder,
