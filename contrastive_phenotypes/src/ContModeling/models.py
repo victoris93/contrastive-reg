@@ -199,7 +199,7 @@ class ReducedMatAutoEncoder(nn.Module):
             nn.Linear(hidden_dim, output_dim_target) 
         )
         
-        self.init_weights(self.feat_to_target_embedding)
+        self.init_weights(self.reduced_mat_to_embed)
         
         self.embed_to_reduced_mat = nn.Sequential(
             nn.Linear(output_dim_target, hidden_dim),
@@ -220,7 +220,12 @@ class ReducedMatAutoEncoder(nn.Module):
             nn.Linear(hidden_dim, self.vectorized_feat_emb_dim)
         )
 
-        self.init_weights(self.target_to_feat_embedding)
+        self.init_weights(self.embed_to_reduced_mat)
+    
+    def init_weights(self, layer):
+        if isinstance(layer, nn.Linear):
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.constant_(layer.bias, 0.0)
         
     def embed_reduced_mat(self, reduced_mat):
         feat_embedding = self.reduced_mat_to_embed(reduced_mat)
@@ -231,7 +236,7 @@ class ReducedMatAutoEncoder(nn.Module):
         recon_reduced_mat = self.embed_to_reduced_mat(feat_embedding)
         return recon_reduced_mat
 
-    def forward(sef, reduced_mat):
+    def forward(self, reduced_mat):
         feat_embedding, feat_embedding_norm = self.reduced_mat_to_embed(reduced_mat)
         recon_reduced_mat = self.recon_reduced_mat(feat_embedding)
         return recon_reduced_mat

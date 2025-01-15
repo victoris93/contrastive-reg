@@ -4,6 +4,7 @@ import torch.optim as optim
 from cmath import isinf
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Subset
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 import numpy as np
 import os
 import sys
@@ -66,7 +67,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, synth_exp=False, reduced_mat=False, threshold=0):
+    def __init__(self, dataset_path, target_names, synth_exp=False, reduced_mat=False, vectorize=False, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
@@ -76,6 +77,9 @@ class MatData(Dataset):
             self.matrices = self.data_array.reduced_matrices.values.astype(np.float32)
         else:
             self.matrices = self.data_array.matrices.values.astype(np.float32)
+
+        if vectorize:
+            self.matrices = sym_matrix_to_vec(self.matrices)
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
 
         if threshold > 0:

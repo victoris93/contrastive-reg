@@ -10,6 +10,7 @@ import os
 from sklearn.decomposition import PCA
 import torch.nn.functional as F
 from pathlib import Path
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.stats import pearsonr, spearmanr
 
 def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
@@ -47,26 +48,25 @@ def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = 
     np.save(save_path, embedding_numpy)
 
 def mean_correlations_between_subjects(y_true, y_pred):
-    correlations = []
+
     y_true = y_true.cpu().detach().numpy()
     y_pred = y_pred.cpu().detach().numpy()
     
     num_subjects = y_true.shape[0]
-    matrix_size = y_true.shape[1]
+
+    lower_true = []
+    lower_pred = []
+
+    if len(y_true.shape) < 3:
+        correlations, _ = spearmanr(y_true.flatten(), y_pred.flatten())
+    else:
+        for subj in range(num_subjects):
+            L_pred = sym_matrix_to_vec(y_pred[subj], discard_diagonal=True)
+            L_true = sym_matrix_to_vec(y_true[subj], discard_diagonal=True)
+            lower_true.extend(L_true.tolist())
+            lower_pred.extend(L_pred.tolist())
+        correlations, _ = spearmanr(lower_true, lower_pred)
     
-    # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
-    upper_true = []
-    upper_pred = []
-    
-    for subj in range(num_subjects):
-        for i in range(matrix_size):
-            for j in range(i + 1, matrix_size):
-                upper_true.append(y_true[subj, i, j])
-                upper_pred.append(y_pred[subj, i, j])
-    
-    # Calculate Spearman correlation
-    spearman_corr, _ = spearmanr(upper_true, upper_pred)
-    correlations.append(spearman_corr)
     correlation = np.mean(correlations)
     
     return correlation
@@ -89,31 +89,30 @@ def get_best_fold(train_fold_results):
 
 def mape_between_subjects(y_true, y_pred):
     eps = 1e-6
-    mapes = []
     y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
     y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
 
     num_subjects = y_true.shape[0]
-    matrix_size = y_true.shape[1]
 
     # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
-    upper_true = []
-    upper_pred = []
+    lower_true = []
+    lower_pred = []
 
-    for subj in range(num_subjects):
-        for i in range(matrix_size):
-            for j in range(i + 1, matrix_size):
-                true_val = y_true[subj, i, j]
-                pred_val = y_pred[subj, i, j]
-
-                # Add epsilon to denominator to avoid division by zero
-                mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
-                upper_true.append(true_val)
-                upper_pred.append(pred_val)
-                mapes.append(mape)
-
-    # Calculate mean MAPE
-    mean_mape = np.mean(mapes)
+    if len(y_true.shape) < 3:
+        mean_mape = (np.abs((y_true.flatten() - y_pred.flatten()) / (y_true.flatten() + eps)) * 100.0).mean()
+        print(y_true.flatten().shape)
+        
+    else:
+        for subj in range(num_subjects):
+            L_pred = sym_matrix_to_vec(y_pred[subj], discard_diagonal=True)
+            L_true = sym_matrix_to_vec(y_true[subj], discard_diagonal=True)
+            lower_true.extend(L_true.tolist())
+            lower_pred.extend(L_pred.tolist())
+        lower_true = np.array(lower_true)
+        print(lower_true.shape)
+        lower_pred = np.array(lower_pred)
+        mean_mape = (np.abs((lower_true - lower_pred) / (lower_true + eps)) * 100.0).mean()
+        
 
     return mean_mape
 

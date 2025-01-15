@@ -155,7 +155,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
     
     return loss_terms, model.state_dict(), val_loss.item()    
 
-def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, device, model=None):
+def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device, model=None):
     wandb.init(project=cfg.project,
        mode = "offline",
        name=cfg.experiment_name,
@@ -163,7 +163,8 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI,
     wandb.config.update(OmegaConf.to_container(cfg, resolve=True))
     
     input_dim_feat = cfg.input_dim_feat
-    output_dim_feat = cfg.output_dim_feat
+    hidden_dim = cfg.hidden_dim
+    output_dim_target = cfg.output_dim_target
     batch_size = cfg.batch_size
     lr = cfg.lr
     weight_decay = cfg.weight_decay
@@ -208,7 +209,7 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI,
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
                 
-                embedding = model.embed_reduced_mat(features)
+                embedding, embedding_norm = model.embed_reduced_mat(features)
                 reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
                 
                 loss = criterion(features, reconstructed_reduced_mat)
@@ -238,7 +239,7 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI,
                 for features, _ in val_loader:
                     features = features.to(device)
 
-                    embedding = model.embed_reduced_mat(features)
+                    embedding, embedding_norm = model.embed_reduced_mat(features)
                     save_embeddings(embedding, "reduced_mat_emb", test = False, cfg = cfg, fold = fold, epoch = epoch)
                     reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
                     save_embeddings(reconstructed_reduced_mat, "recon_reduced_mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
@@ -484,13 +485,13 @@ def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir,
     test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
     input_dim_feat = cfg.input_dim_feat
     hidden_dim = cfg.hidden_dim
-    output_dim_feat = cfg.output_dim_feat
+    output_dim_target = cfg.output_dim_target
     dropout_rate = cfg.dropout_rate
 
     model = ReducedMatAutoEncoder(
             input_dim_feat,
             hidden_dim,
-            output_dim_feat,
+            output_dim_target,
             dropout_rate,
             cfg
             ).to(device)
@@ -517,12 +518,13 @@ def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir,
 
             features = features.to(device)
 
-            embedding = model.embed_reduced_mat(features)
+            embedding, embedding_norm = model.embed_reduced_mat(features)
             reconstructed_reduced_mat = model.recon_reduced_mat(embedding)
 
             np.save(f'{recon_mat_dir}/recon_reduced_mat_fold{best_fold}_batch_{i+1}', reconstructed_reduced_mat.cpu().numpy())
             mape_mat = torch.abs((features - reconstructed_reduced_mat) / (features + 1e-10)) * 100
-            np.save(f'{recon_mat_dir}/mape_reduced_mat_fold{best_fold}_batch_{i+1}', mape_mat.cpu().numpy())
+            mape_mat = sym_matrix_to_vec(mape_mat.cpu().numpy())
+            np.save(f'{recon_mat_dir}/mape_reduced_mat_fold{best_fold}_batch_{i+1}', mape_mat)
 
             loss = criterion(features, reconstructed_reduced_mat)
             mean_corr = mean_correlations_between_subjects(features, reconstructed_reduced_mat)
@@ -540,7 +542,7 @@ def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir,
                 'Test | Loss': loss,
                 })
         
-        recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False, True)
+        recon_mat = load_recon_mats(cfg.experiment_name, cfg.work_dir, False, False, True)
         true_mat = load_true_mats(cfg.dataset_path, cfg.experiment_name, cfg.work_dir, False, False)
         mape_mat = load_mape(cfg.experiment_name, cfg.work_dir)
         test_idx_path = f"{cfg.output_dir}/{cfg.experiment_name}/test_idx.npy"

@@ -125,24 +125,30 @@ def load_recon_mats(exp_name, work_dir, vectorize, is_full_model=False, reduced_
     recon_mat_files = sorted(recon_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
-    
-    for i in range(recon_mat.shape[0]):
-        np.fill_diagonal(recon_mat[i], 1.0)
-    
+
+    if reduced_mat:
+        recon_mat = vec_to_sym_matrix(recon_mat)
+    else:
+        for i in range(recon_mat.shape[0]):
+            np.fill_diagonal(recon_mat[i], 1.0)
     if vectorize:
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(data_path, exp_name, work_dir, vectorize=False, is_full_model=False, run_num=None):
+def load_true_mats(data_path, exp_name, work_dir, vectorize=False, reduced_mat=False,  is_full_model=False, run_num=None):
     recon_path_suffix = ""
     if is_full_model:
         recon_path_suffix = f"_run{run_num}"
-    mat_type_suffix = "recon_"
 
     test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)
     dataset = xr.open_dataset(data_path)
-    true_mat = dataset.matrices.isel(subject = test_idx).values
+    if reduced_mat:
+        true_mat = dataset.reduced_matrices.isel(subject = test_idx).values
+        true_mat = vec_to_sym_matrix(true_mat)
+    else:
+        true_mat = dataset.matrices.isel(subject = test_idx).values
+
     if vectorize:
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
