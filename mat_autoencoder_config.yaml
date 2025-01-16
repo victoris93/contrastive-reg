@@ -1,10 +1,14 @@
 project: "PretrainMatAE"
 experiment_name: "ext_reduced_mat_ae_abcd"
 
+hydra:
+  run:
+    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 100
+num_epochs: 200
 batch_size: 128
 kfolds: 5
 lr: 0.001
@@ -15,7 +19,7 @@ test_size : 0.3
 seed : 42
 log_gradients: True
 clip_grad: True
-synth_exp: True
+synth_exp: False
 
 # test options
 external_test_mode: True
@@ -29,10 +33,11 @@ ReEig: False
 skip_enc1: False
 
 # Model dimensions
-input_dim_feat: 400
-hidden_dim : 100
+input_dim_feat: 100
+hidden_dim : 128
 output_dim_feat: 100
-input_type: "matrices" # Options: matrices, targets
+output_dim_target: 64
+input_type: "reduced_mat" # Options: matrices, targets
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
@@ -41,13 +46,13 @@ loss_function: Norm  # Options: LogEuclidean, Norm, MSE
 best_fold: 1
 
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels.nc"
 targets:
     - pea_wiscv_trs # makes no difference, no downstream task
 
 # Directory for saving results
-work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+work_dir: "/data/parietal/store/work/vshevche"
 embedding_dir : embeddings
 reconstructed_dir : recon_mat
 model_weight_dir : saved_models
-output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
+output_dir: "/data/parietal/store/work/vshevche/results"

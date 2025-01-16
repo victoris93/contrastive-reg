@@ -145,7 +145,6 @@ def load_true_mats(data_path, exp_name, work_dir, vectorize=False, reduced_mat=F
     dataset = xr.open_dataset(data_path)
     if reduced_mat:
         true_mat = dataset.reduced_matrices.isel(subject = test_idx).values
-        true_mat = vec_to_sym_matrix(true_mat)
     else:
         true_mat = dataset.matrices.isel(subject = test_idx).values
 
@@ -159,7 +158,7 @@ def load_mape(exp_name, work_dir, is_full_model = False, run_num = None):
         recon_path_suffix = f"_run{run_num}"
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"mape_mat{recon_path_suffix}" in file])
+    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "mape" in file and recon_path_suffix in file])
     mape_mat_files = sorted(mape_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     mape_paths = [os.path.join(recon_mat_dir, file) for file in mape_mat_files]
     mape_mat = np.concatenate([np.load(path) for path in mape_paths])
