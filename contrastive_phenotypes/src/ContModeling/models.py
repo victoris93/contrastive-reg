@@ -45,11 +45,7 @@ class PhenoProj(nn.Module):
 
         A = np.random.rand(output_dim_feat, output_dim_feat)
         A = (A + A.T) / 2
-        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))
-
-        self.init_weights(self.target_ae.encode_target)
-        self.init_weights(self.target_ae.decode_target)
-        
+        self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))        
 
     def init_weights(self, layer):
         if isinstance(layer, nn.Linear):
@@ -63,11 +59,11 @@ class PhenoProj(nn.Module):
         return self.matrix_ae.decode_feat(embedding)
     
     def encode_reduced_mat(self, feat_embedding): # note that the feat embedding was vectorized
-        embedding, embedding_norm = self.reduced_matrix_ae.reduced_mat_to_embed(feat_embedding)
+        embedding, embedding_norm = self.reduced_matrix_ae.embed_reduced_mat(feat_embedding)
         return embedding, embedding_norm
 
     def decode_reduced_mat(self, embedding): # invert the embedding from target space to feature space to reconstruct the matrix
-        recon_reduced_mat = self.reduced_matrix_ae.embed_to_reduced_mat(embedding)
+        recon_reduced_mat = self.reduced_matrix_ae.recon_reduced_mat(embedding)
         return recon_reduced_mat
     
     def decode_targets(self, embedding):
@@ -199,7 +195,7 @@ class ReducedMatAutoEncoder(nn.Module):
     def forward(self, reduced_mat):
         feat_embedding, feat_embedding_norm = self.reduced_mat_to_embed(reduced_mat)
         recon_reduced_mat = self.recon_reduced_mat(feat_embedding)
-        return recon_reduced_mat
+        return recon_reduced_mat, feat_embedding, feat_embedding_norm
 
 class TargetDecoder(nn.Module):
     def __init__(
@@ -211,7 +207,6 @@ class TargetDecoder(nn.Module):
         cfg # just in case
     ):
         super(TargetDecoder, self).__init__()
-
 
         self.decode_target = nn.Sequential(
             nn.Linear(output_dim_target, hidden_dim),
@@ -231,6 +226,13 @@ class TargetDecoder(nn.Module):
 
             nn.Linear(hidden_dim, input_dim_target),
         )
+        
+        self.init_weights(self.decode_target)
+
+    def init_weights(self, layer):
+        if isinstance(layer, nn.Linear):
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.constant_(layer.bias, 0.0)
 
     def decode_targets(self, target_embedding):
         return self.decode_target(target_embedding)
