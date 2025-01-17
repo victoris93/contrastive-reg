@@ -1,10 +1,14 @@
 project: "PhenProj"
-experiment_name: "inv_embed_ext"
+experiment_name: "inv_sup_embed_full"
 hypothesis: "-"
+
+hydra:
+  run:
+    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 128
+output_dim_feat: 100
 hidden_dim: 128
 input_dim_target: 1
 output_dim_target: 64
@@ -14,30 +18,32 @@ skip_enc1: False
 ReEig: False
 
 # Pretrained models options
-mat_ae_pretrained: False
-target_ae_pretrained: False
-pretrained_mat_ae_exp: "internal_mat_ae_abcd"
-pretrained_target_ae_exp: "target_ae"
+mat_ae_pretrained: True
+reduced_mat_ae_pretrained: True
+mat_ae_freeze: True
+reduced_mat_ae_freeze: True
+pretrained_mat_ae_exp: "ext_mat_ae_abcd"
+pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
 best_mat_ae_fold: 4
-best_target_ae_fold: 1
+best_reduced_mat_ae_fold: 4
 synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 100
+num_epochs: 300
 batch_size: 128
-n_runs: 1
+n_runs: 20
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
-scheduler_patience: 10
+scheduler_patience: 20
 test_ratio: 0.3 # makes no difference if some part of the model is pretrained or external test mode
 train_ratio: [0.1, 0.3, 0.5, 0.7, 1.0] # multiple values for a learning curve
 log_gradients: True
-clip_grad: True
+clip_grad: False
 
 # test options
-external_test_mode: False # relevant if no part of the model is pretrained
+external_test_mode: True # relevant if no part of the model is pretrained
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -69,7 +75,8 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
+# dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels.nc"
 targets:
     # - pea_wiscv_tss
     # - nihtbx_picvocab_agecorrected
@@ -110,8 +117,13 @@ targets:
 standardize_targets: False
 
 # Directory for saving results
-work_dir: "/well/margulies/users/cpy397/contrastive-learning"
-reconstructed_dir : recon_mat
+# work_dir: "/well/margulies/users/cpy397/contrastive-learning"
+# reconstructed_dir : recon_mat
+# embedding_dir : embeddings
+# model_weight_dir : saved_models
+# output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
+work_dir: "/data/parietal/store/work/vshevche"
 embedding_dir : embeddings
+reconstructed_dir : recon_mat
 model_weight_dir : saved_models
-output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
+output_dir: "/data/parietal/store/work/vshevche/results"

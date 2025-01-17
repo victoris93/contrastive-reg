@@ -185,11 +185,11 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X_embedded = model.encode_features(X)
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
-                    X_emb_reduced, X_emb_reduced_norm = model.transfer_embedding(X_embedded)
+                    X_emb_reduced, X_emb_reduced_norm = model.encode_reduced_mat(X_embedded)
                     
                     if label == 'test' and train_ratio == 1.0:
                         np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
-                        inv_feat_embedding = model.inv_embedding(X_emb_reduced).detach().cpu().numpy()
+                        inv_feat_embedding = model.decode_reduced_mat(X_emb_reduced).detach().cpu().numpy()
                         inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
                         inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
                         recon_mat = model.decode_features(inv_feat_embedding)
@@ -276,10 +276,21 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         print("Loading pretrained MatrixAutoencoder...")
         state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
         model.matrix_ae.load_state_dict(state_dict)
+        if cfg.mat_ae_freeze:
+            for param in model.matrix_ae.parameters():
+                param.requires_grad = False
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
         model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
     
+    if cfg.reduced_mat_ae_pretrained:
+        print("Loading pretrained ReducedMatrixAutoencoder...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_reduced_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_reduced_mat_ae_fold}.pth")
+        model.reduced_matrix_ae.load_state_dict(state_dict)
+        if cfg.reduced_mat_ae_freeze:
+            for param in model.reduced_matrix_ae.parameters():
+                param.requires_grad = False
+
     if cfg.target_ae_pretrained:
         print("Loading pretrained TargetAutoencoder...")
         state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_target_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_target_ae_fold}.pth")
@@ -332,33 +343,22 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 features = features.to(device)
                 targets = targets.to(device)
 
-                ## FEATURE ENCODING
+                ## FEATURE ENCODING == MATRIX REDUCTION
                 embedded_feat = model.encode_features(features)
-                ## FEATURE DECODING
                 
-                ## REDUCED FEAT TO TARGET EMBEDDING
+                ## VECTORIZE REDUCED MATRIX
                 embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy())
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(torch.float32).to(device)
 
-                features_vectorized = sym_matrix_to_vec(features.detach().cpu().numpy())
-                features_vectorized = torch.tensor(features_vectorized).to(torch.float32).to(device)
+                ## EMBEDDING OF THE REDUCED MATRIX
+                reduced_feat_embedding, reduced_feat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
 
-                ## KERNLIZED LOSS: MAT embedding vs MAT
-                # kernel_embedded_feature_loss, direction_reg_features = criterion_pft(embedded_feat_vectorized.unsqueeze(1), features_vectorized)
-                # kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
-                # direction_reg_features = 100 * direction_reg_features
+                ## RECONSTRUCT REDUCED MATRIX FROM EMBEDDING AND THE FULL MATRIX FROM REDUCED
+                recon_reduced_mat = model.decode_reduced_mat(reduced_feat_embedding)
+                reconstructed_feat = model.decode_features(recon_reduced_mat)
 
-                ## TARGET DECODING FROM MAT EMBEDDING
-                reduced_feat_embedding, reduced_feat_embedding_norm = model.transfer_embedding(embedded_feat_vectorized)
-
-                if not cfg.mat_ae_pretrained:
-                    inv_feat_embedding = model.inv_embedding(reduced_feat_embedding).detach().cpu().numpy()
-                    inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
-                    inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
-                    reconstructed_feat = model.decode_features(inv_feat_embedding)
-                    ## FEATURE DECODING LOSS
-                    feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
-                    # reduced_feat_loss = feature_autoencoder_crit(embedded_feat, inv_feat_embedding) / 10_000
+                ## FEATURE DECODING LOSS
+                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
                     
                 out_target_decoded = model.decode_targets(reduced_feat_embedding_norm)
 
@@ -431,11 +431,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 for (features, targets) in test_loader:
                     
                     features, targets = features.to(device), targets.to(device)                    
-                    out_feat = model.encode_features(features)
+                    reduced_mat = model.encode_features(features)
                     
-                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy())).to(torch.float32).to(device)
-                    transfer_out_feat, transfer_out_feat_norm = model.transfer_embedding(out_feat)
-                    out_target_decoded = model.decode_targets(transfer_out_feat_norm)
+                    reduced_mat = torch.tensor(sym_matrix_to_vec(reduced_mat.detach().cpu().numpy())).to(torch.float32).to(device)
+                    embedding, embedding_norm = model.encode_reduced_mat(reduced_mat)
+                    out_target_decoded = model.decode_targets(embedding_norm)
                     
                     epsilon = 1e-8
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100

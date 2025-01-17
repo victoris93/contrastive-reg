@@ -1,5 +1,5 @@
 project: "PretrainMatAE"
-experiment_name: "ext_reduced_mat_ae_abcd"
+experiment_name: "ext_sup_reduced_mat_ae_abcd"
 
 hydra:
   run:
@@ -9,7 +9,7 @@ hypothesis: "-"
 # Training parameters
 multi_gpu: True
 num_epochs: 200
-batch_size: 128
+batch_size: 64
 kfolds: 5
 lr: 0.001
 weight_decay: 0
@@ -41,6 +41,11 @@ input_type: "reduced_mat" # Options: matrices, targets
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
+supcon_base_temperature: 0.03
+supcon_temperature: 0.03
+supcon_sigma: 1
+supcon_reg_term: 0.01
+SupCon_kernel: cauchy
 
 # modify manually if test is run as a separate job
 best_fold: 1
@@ -48,7 +53,7 @@ best_fold: 1
 # Paths for data
 dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels.nc"
 targets:
-    - pea_wiscv_trs # makes no difference, no downstream task
+    - nihtbx_totalcomp_agecorrected # used is supervised
 
 # Directory for saving results
 work_dir: "/data/parietal/store/work/vshevche"
