@@ -291,11 +291,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             for param in model.reduced_matrix_ae.parameters():
                 param.requires_grad = False
 
-    if cfg.target_ae_pretrained:
-        print("Loading pretrained TargetAutoencoder...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_target_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_target_ae_fold}.pth")
-        model.target_ae.load_state_dict(state_dict)
-
     criterion_pft = KernelizedSupCon(
         method="expw",
         temperature=cfg.pft_temperature,
@@ -335,7 +330,11 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
-
+            if cfg.mat_ae_pretrained:
+                model.matrix_ae.eval()
+            if cfg.reduced_mat_ae_pretrained:
+                model.reduced_matrix_ae.eval()
+                
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
                 
@@ -351,20 +350,21 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(torch.float32).to(device)
 
                 ## EMBEDDING OF THE REDUCED MATRIX
-                reduced_feat_embedding, reduced_feat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
+                reduced_mat_embedding, reduced_mat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
 
                 ## RECONSTRUCT REDUCED MATRIX FROM EMBEDDING AND THE FULL MATRIX FROM REDUCED
-                recon_reduced_mat = model.decode_reduced_mat(reduced_feat_embedding)
+                recon_reduced_mat = model.decode_reduced_mat(reduced_mat_embedding).detach().cpu().numpy()
+                recon_reduced_mat = vec_to_sym_matrix(recon_reduced_mat)
+                recon_reduced_mat = torch.tensor(recon_reduced_mat).to(torch.float32).to(device)
                 reconstructed_feat = model.decode_features(recon_reduced_mat)
 
                 ## FEATURE DECODING LOSS
                 feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
-                    
-                out_target_decoded = model.decode_targets(reduced_feat_embedding_norm)
+                out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
 
                 ## KERNLIZED LOSS: MAT embedding vs targets
-                kernel_embedded_target_loss, direction_reg_target = criterion_ptt(reduced_feat_embedding_norm.unsqueeze(1), targets)
-                kernel_embedded_target_loss = 100 * kernel_embedded_target_loss
+                kernel_embedded_target_loss, direction_reg_target = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
+                kernel_embedded_target_loss = 1000 * kernel_embedded_target_loss
                 direction_reg_target = 100 * direction_reg_target
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
@@ -375,7 +375,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
 
                 ## SUM ALL LOSSES
-                loss = kernel_embedded_target_loss + target_decoding_from_reduced_emb_loss
+                loss = target_decoding_from_reduced_emb_loss
                 # print(kernel_embedded_target_loss, kernel_embedded_target_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
                 if not cfg.mat_ae_pretrained:
@@ -453,7 +453,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 })
             
             scheduler.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -4:
+            if np.log10(scheduler._last_lr[0]) < -5:
                 break
 
             pbar.set_postfix_str(
@@ -499,7 +499,7 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu_short",
+            slurm_partition="gpu",
             gpus_per_node=1,
             tasks_per_node=1,
             nodes=1

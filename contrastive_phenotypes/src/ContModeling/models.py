@@ -123,7 +123,7 @@ class MatAutoEncoder(nn.Module):
 class ReducedMatAutoEncoder(nn.Module):
     def __init__(
         self,
-        input_dim_feat,
+        output_dim_feat,
         hidden_dim,
         output_dim_target,
         dropout_rate,
@@ -131,8 +131,9 @@ class ReducedMatAutoEncoder(nn.Module):
     ):
         super(ReducedMatAutoEncoder, self).__init__()
         self.cfg = cfg
+        self.skip_conn = self.cfg.skip_conn
         
-        A = np.random.rand(input_dim_feat, input_dim_feat)
+        A = np.random.rand(output_dim_feat, output_dim_feat)
         A = (A + A.T) / 2
         self.vectorized_feat_emb_dim = len(sym_matrix_to_vec(A))
         
@@ -184,12 +185,16 @@ class ReducedMatAutoEncoder(nn.Module):
             nn.init.constant_(layer.bias, 0.0)
         
     def embed_reduced_mat(self, reduced_mat):
+        if self.skip_conn:
+            self.original_reduced_mat = reduced_mat
         feat_embedding = self.reduced_mat_to_embed(reduced_mat)
         feat_embedding_norm = nn.functional.normalize(feat_embedding, p=2, dim=1)
         return feat_embedding, feat_embedding_norm
 
     def recon_reduced_mat(self, feat_embedding):
         recon_reduced_mat = self.embed_to_reduced_mat(feat_embedding)
+        if self.skip_conn:
+            recon_reduced_mat = self.original_reduced_mat + recon_reduced_mat
         return recon_reduced_mat
 
     def forward(self, reduced_mat):
