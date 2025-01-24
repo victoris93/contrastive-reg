@@ -276,8 +276,17 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         print("Loading pretrained MatrixAutoencoder...")
         state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
         model.matrix_ae.load_state_dict(state_dict)
-        if cfg.mat_ae_freeze:
-            for param in model.matrix_ae.parameters():
+        if cfg.mat_ae_enc_freeze:
+            print("Freezing weights for mat encoding...")
+            for param in model.matrix_ae.enc_mat1.parameters():
+                param.requires_grad = False
+            for param in model.matrix_ae.enc_mat2.parameters():
+                param.requires_grad = False
+        if cfg.mat_ae_dec_freeze:
+            print("Freezing weights for mat decoding...")
+            for param in model.matrix_ae.dec_mat1.parameters():
+                param.requires_grad = False
+            for param in model.matrix_ae.dec_mat2.parameters():
                 param.requires_grad = False
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
@@ -330,8 +339,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
-            if cfg.mat_ae_pretrained:
-                model.matrix_ae.eval()
+
             if cfg.reduced_mat_ae_pretrained:
                 model.reduced_matrix_ae.eval()
                 
@@ -357,30 +365,27 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 recon_reduced_mat = vec_to_sym_matrix(recon_reduced_mat)
                 recon_reduced_mat = torch.tensor(recon_reduced_mat).to(torch.float32).to(device)
                 reconstructed_feat = model.decode_features(recon_reduced_mat)
-
-                ## FEATURE DECODING LOSS
-                feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
                 out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
-
-                ## KERNLIZED LOSS: MAT embedding vs targets
-                kernel_embedded_target_loss, direction_reg_target = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
-                kernel_embedded_target_loss = 1000 * kernel_embedded_target_loss
-                direction_reg_target = 100 * direction_reg_target
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
                 if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
                     target_decoding_crit = nn.HuberLoss(delta = cfg.huber_delta)
                 
-                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded) / 100
+                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
 
 
                 ## SUM ALL LOSSES
                 loss = target_decoding_from_reduced_emb_loss
-                # print(kernel_embedded_target_loss, kernel_embedded_target_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
 
-                if not cfg.mat_ae_pretrained:
+                if not cfg.reduced_mat_ae_freeze:
+                    ## KERNLIZED LOSS: MAT embedding vs targets
+                    kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
+                    kernel_embedded_target_loss = 1000 * kernel_embedded_target_loss
+                    loss += kernel_embedded_target_loss
+
+                if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
+                    feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 1000
                     loss += feature_autoencoder_loss
-                    # loss += reduced_feat_loss
 
                 loss.backward()
 
@@ -393,29 +398,32 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                             wandb.log({
                                 "Epoch": epoch,
                                 f"Gradient Norm/{name}": param.grad.norm().item()
-                                })  
+                            })  
 
                 optimizer.step()
 
                 loss_terms_batch['loss'] = loss.item() / len(features)
-                loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
+                if not cfg.reduced_mat_ae_freeze:
+                    loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
+                    })
+
                 loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
                 # loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
                 
-                if not cfg.mat_ae_pretrained:
+                if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
-                    # loss_terms_batch['reduced_feat_loss'] = reduced_feat_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
                         'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
-                        # 'reduced_feat_loss': loss_terms_batch['reduced_feat_loss']
                     })
                 
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
-                    'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     # 'direction_reg_target_loss': loss_terms_batch['direction_reg_target_loss'],
                     # 'direction_reg_features_loss': loss_terms_batch['direction_reg_features_loss'],
                     'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']

@@ -31,6 +31,7 @@ test_scanners:
 # enhancements
 ReEig: False
 skip_enc1: False
+skip_conn: True
 
 # Model dimensions
 input_dim_feat: 100
