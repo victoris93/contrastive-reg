@@ -1,5 +1,5 @@
 project: "PhenProj"
-experiment_name: "skip_inv_sup_embed_full_ae_frozen"
+experiment_name: "inv_sup_embed_full"
 hypothesis: "-"
 
 hydra:
@@ -14,7 +14,7 @@ input_dim_target: 1
 output_dim_target: 64
 
 # MatAutoencoder options
-skip_conn: True
+skip_conn: False
 skip_enc1: False
 ReEig: False
 
@@ -22,7 +22,7 @@ ReEig: False
 mat_ae_pretrained: True
 reduced_mat_ae_pretrained: True
 mat_ae_enc_freeze: True
-mat_ae_dec_freeze: True
+mat_ae_dec_freeze: False
 reduced_mat_ae_freeze: True
 pretrained_mat_ae_exp: "ext_mat_ae_abcd"
 pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
