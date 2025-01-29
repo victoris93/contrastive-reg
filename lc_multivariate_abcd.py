@@ -272,33 +272,53 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             cfg
         ).to(device)
 
-    if cfg.mat_ae_pretrained:
-        print("Loading pretrained MatrixAutoencoder...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
-        model.matrix_ae.load_state_dict(state_dict)
-        if cfg.mat_ae_enc_freeze:
-            print("Freezing weights for mat encoding...")
-            for param in model.matrix_ae.enc_mat1.parameters():
-                param.requires_grad = False
-            for param in model.matrix_ae.enc_mat2.parameters():
-                param.requires_grad = False
-        if cfg.mat_ae_dec_freeze:
-            print("Freezing weights for mat decoding...")
-            for param in model.matrix_ae.dec_mat1.parameters():
-                param.requires_grad = False
-            for param in model.matrix_ae.dec_mat2.parameters():
-                param.requires_grad = False
+    if cfg.full_model_pretrained:
+        print("Loading pretrained model...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_run0.pth")
+        model.load_state_dict(state_dict)
+
+    else:
+        if cfg.mat_ae_pretrained:
+            print("Loading pretrained MatrixAutoencoder...")
+            state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
+            model.matrix_ae.load_state_dict(state_dict)
+
+        if cfg.reduced_mat_ae_pretrained:
+            print("Loading pretrained ReducedMatrixAutoencoder...")
+            state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_reduced_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_reduced_mat_ae_fold}.pth")
+            model.reduced_matrix_ae.load_state_dict(state_dict)
+        
+    if cfg.mat_ae_enc_freeze:
+        print("Freezing weights for mat encoding...")
+        for param in model.matrix_ae.enc_mat1.parameters():
+            param.requires_grad = False
+        for param in model.matrix_ae.enc_mat2.parameters():
+            param.requires_grad = False
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
         model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+
+    if cfg.mat_ae_dec_freeze:
+        print("Freezing weights for mat decoding...")
+        for param in model.matrix_ae.dec_mat1.parameters():
+            param.requires_grad = False
+        for param in model.matrix_ae.dec_mat2.parameters():
+            param.requires_grad = False
     
-    if cfg.reduced_mat_ae_pretrained:
-        print("Loading pretrained ReducedMatrixAutoencoder...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_reduced_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_reduced_mat_ae_fold}.pth")
-        model.reduced_matrix_ae.load_state_dict(state_dict)
-        if cfg.reduced_mat_ae_freeze:
-            for param in model.reduced_matrix_ae.parameters():
-                param.requires_grad = False
+    if cfg.reduced_mat_ae_enc_freeze:
+        print("Freezing weights for reduced mat encoding...")
+        for param in model.reduced_matrix_ae.reduced_mat_to_embed.parameters():
+            param.requires_grad = False
+
+    if cfg.reduced_mat_ae_dec_freeze:
+        print("Freezing weights for reduced mat decoding...")
+        for param in model.reduced_matrix_ae.embed_to_reduced_mat.parameters():
+            param.requires_grad = False
+    
+    if cfg.target_dec_freeze:
+        print("Freezing TargetDecoder...")
+        for param in model.target_dec.parameters():
+            param.requires_grad = False
 
     criterion_pft = KernelizedSupCon(
         method="expw",
@@ -342,9 +362,17 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
             if cfg.reduced_mat_ae_pretrained:
                 model.reduced_matrix_ae.eval()
+            if cfg.reduced_mat_ae_enc_freeze:
+                model.reduced_matrix_ae.reduced_mat_to_embed.eval()
+            if cfg.reduced_mat_ae_dec_freeze:
+                model.reduced_matrix_ae.embed_to_reduced_mat.eval()
+            if cfg.target_dec_freeze:
+                model.target_dec.eval()
                 
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
+
+                loss = 0
                 
                 optimizer.zero_grad()
                 features = features.to(device)
@@ -359,25 +387,25 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 ## EMBEDDING OF THE REDUCED MATRIX
                 reduced_mat_embedding, reduced_mat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
+                out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
 
                 ## RECONSTRUCT REDUCED MATRIX FROM EMBEDDING AND THE FULL MATRIX FROM REDUCED
-                recon_reduced_mat = model.decode_reduced_mat(reduced_mat_embedding).detach().cpu().numpy()
-                recon_reduced_mat = vec_to_sym_matrix(recon_reduced_mat)
+                recon_reduced_mat = model.decode_reduced_mat(reduced_mat_embedding)
+
+                if not cfg.reduced_mat_ae_dec_freeze:
+                    reduced_mat_recon_loss = feature_autoencoder_crit(embedded_feat_vectorized, recon_reduced_mat) / 1000
+                    loss += reduced_mat_recon_loss
+
+                recon_reduced_mat = vec_to_sym_matrix(recon_reduced_mat.detach().cpu().numpy())
                 recon_reduced_mat = torch.tensor(recon_reduced_mat).to(torch.float32).to(device)
+
                 reconstructed_feat = model.decode_features(recon_reduced_mat)
-                out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
                 if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
                     target_decoding_crit = nn.HuberLoss(delta = cfg.huber_delta)
-                
-                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
 
-
-                ## SUM ALL LOSSES
-                loss = target_decoding_from_reduced_emb_loss
-
-                if not cfg.reduced_mat_ae_freeze:
+                if not cfg.reduced_mat_ae_enc_freeze:
                     ## KERNLIZED LOSS: MAT embedding vs targets
                     kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
                     kernel_embedded_target_loss = 1000 * kernel_embedded_target_loss
@@ -386,6 +414,10 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 1000
                     loss += feature_autoencoder_loss
+
+                if not cfg.target_dec_freeze:
+                    target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
+                    loss += target_decoding_from_reduced_emb_loss
 
                 loss.backward()
 
@@ -403,14 +435,29 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 optimizer.step()
 
                 loss_terms_batch['loss'] = loss.item() / len(features)
-                if not cfg.reduced_mat_ae_freeze:
+
+                if not cfg.reduced_mat_ae_enc_freeze:
                     loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
+
                     wandb.log({
                         'Epoch': epoch,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     })
 
-                loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
+                if not cfg.reduced_mat_ae_dec_freeze:
+                    loss_terms_batch['reduced_mat_recon_loss'] = reduced_mat_recon_loss.item() / len(features)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'reduced_mat_recon_loss': loss_terms_batch['reduced_mat_recon_loss'],
+                    })
+                
+                if not cfg.target_dec_freeze:
+                    loss_terms_batch['target_decoding_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
+                    })
+
                 # loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
                 
                 if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
@@ -424,9 +471,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     'Epoch': epoch,
                     'Run': run,
                     'total_loss': loss_terms_batch['loss'],
-                    # 'direction_reg_target_loss': loss_terms_batch['direction_reg_target_loss'],
-                    # 'direction_reg_features_loss': loss_terms_batch['direction_reg_features_loss'],
-                    'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 
             loss_terms_batch['epoch'] = epoch

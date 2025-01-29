@@ -1,5 +1,5 @@
-project: "PhenProj"
-experiment_name: "inv_sup_embed_full"
+project: "PhenProjDistributed"
+experiment_name: "train_redmat_dec"
 hypothesis: "-"
 
 hydra:
@@ -19,13 +19,23 @@ skip_enc1: False
 ReEig: False
 
 # Pretrained models options
-mat_ae_pretrained: True
-reduced_mat_ae_pretrained: True
-mat_ae_enc_freeze: True
-mat_ae_dec_freeze: False
-reduced_mat_ae_freeze: True
+full_model_pretrained: True
+mat_ae_pretrained: False
+reduced_mat_ae_pretrained: False
+
 pretrained_mat_ae_exp: "ext_mat_ae_abcd"
 pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
+pretrained_full_model_exp: "train_target_enc"
+
+mat_ae_enc_freeze: True
+mat_ae_dec_freeze: True
+
+reduced_mat_ae_enc_freeze: True
+reduced_mat_ae_dec_freeze: False
+
+target_dec_freeze: True
+
+
 best_mat_ae_fold: 4
 best_reduced_mat_ae_fold: 4
 synth_exp: False
