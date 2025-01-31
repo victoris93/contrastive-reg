@@ -5,7 +5,7 @@ import xarray as xr
 from tqdm import tqdm
 import sys
 
-root = "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+root = "/data/parietal/store/work/vshevche"
 run = 0
 exp_name = sys.argv[1]
 dataset = sys.argv[2]
@@ -20,7 +20,7 @@ step = int(sys.argv[4])
 
 neigh = NearestNeighbors(n_neighbors=n_neighbors, radius=1, algorithm='brute', metric = 'cosine', p = 2).fit(embeddings)
 distances, neighbors = neigh.kneighbors(embeddings, return_distance = True)
-data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels_1.nc')
+data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels.nc')
 
 neigh_conn_var = []
 
@@ -36,7 +36,6 @@ for neighborhood in tqdm(neighbors[0::step]):
 
     for mat_idx, mat in enumerate(neigh_matrices):
         if mat_idx != 0:
-            print("mat_idx: ", mat_idx)
             var_shift = (centroid - mat) ** 2
             var += var_shift
             sub_dvar_ddist = var_shift / dist_neigh[mat_idx]

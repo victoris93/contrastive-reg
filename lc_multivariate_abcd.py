@@ -107,7 +107,7 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
             train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
-            std_train_targets, mean, std= standardize(train_targets)
+            std_train_targets, mean, std = standardize(train_targets)
             # scaler = MinMaxScaler().fit(train_targets)
             # train_targets = scaler.transform(train_targets)
 
@@ -230,7 +230,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         if save_model:
             saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
             os.makedirs(saved_models_dir, exist_ok=True)
-            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_run{run}.pth")
+            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_train_ratio{train_ratio}_run{run}.pth")
 
         return self.results
 
@@ -273,8 +273,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
         ).to(device)
 
     if cfg.full_model_pretrained:
-        print("Loading pretrained model...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_run0.pth")
+        print(f"Loading pretrained FULL model, train ratio {train_ratio}...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_train_ratio{train_ratio}_run0.pth")
         model.load_state_dict(state_dict)
 
     else:
