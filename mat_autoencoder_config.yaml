@@ -1,5 +1,5 @@
-project: "PretrainMatAE"
-experiment_name: "ext_sup_reduced_mat_ae_abcd"
+project: "MatAE"
+experiment_name: "pretrain_mat_ae_hcp"
 
 hydra:
   run:
@@ -9,7 +9,7 @@ hypothesis: "-"
 # Training parameters
 multi_gpu: True
 num_epochs: 200
-batch_size: 64
+batch_size: 128
 kfolds: 5
 lr: 0.001
 weight_decay: 0
@@ -22,7 +22,7 @@ clip_grad: True
 synth_exp: False
 
 # test options
-external_test_mode: True
+external_test_mode: False
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -34,27 +34,27 @@ skip_enc1: False
 skip_conn: True
 
 # Model dimensions
-input_dim_feat: 100
+input_dim_feat: 400
 hidden_dim : 128
 output_dim_feat: 100
 output_dim_target: 64
-input_type: "reduced_mat" # Options: matrices, targets
+input_type: "matrices" # Options: matrices, reduced_mat
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
-supcon_base_temperature: 0.03
-supcon_temperature: 0.03
+supcon_base_temperature: 0.07
+supcon_temperature: 0.07
 supcon_sigma: 1
 supcon_reg_term: 0.01
 SupCon_kernel: cauchy
 
 # modify manually if test is run as a separate job
-best_fold: 1
+best_fold: 2
 
 # Paths for data
-dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels.nc"
+dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
-    - nihtbx_totalcomp_agecorrected # used is supervised
+    - CogTotalComp_AgeAdj # used is supervised
 
 # Directory for saving results
 work_dir: "/data/parietal/store/work/vshevche"

@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from PIL import Image
 from scipy.linalg import issymmetric
+from .utils import filter_nans_X
 import os
 import re
 from tqdm import tqdm
@@ -144,9 +145,10 @@ def load_true_mats(data_path, exp_name, work_dir, vectorize=False, reduced_mat=F
     test_idx = np.load(test_idx_path)
     dataset = xr.open_dataset(data_path)
     if reduced_mat:
-        true_mat = dataset.reduced_matrices.isel(subject = test_idx).values
+        true_mat = dataset.reduced_matrices.isel(index = test_idx).values
     else:
-        true_mat = dataset.matrices.isel(subject = test_idx).values
+        true_mat = dataset.matrices.isel(index = test_idx).values
+    true_mat, _ = filter_nans_X(true_mat)
 
     if vectorize:
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)

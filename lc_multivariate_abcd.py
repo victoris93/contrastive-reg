@@ -28,7 +28,13 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from sklearn.preprocessing import MinMaxScaler
 
-from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
+from ContModeling.utils import (
+    gaussian_kernel,
+    cauchy,
+    standardize,
+    save_embeddings,
+    filter_nans
+)
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
@@ -180,8 +186,12 @@ class ModelRun(submitit.helpers.Checkpointable):
                         is_test = False
                     
                     X, y = zip(*d)
-                    X = torch.stack(X).to(device)
-                    y = torch.stack(y).to(device)
+                    X = torch.stack(X)
+                    y = torch.stack(y)
+                    X, y, d_indices = filter_nans(X, y, d_indices)
+                    X = X.to(device)
+                    y = y.to(device)
+
                     X_embedded = model.encode_features(X)
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
@@ -212,6 +222,7 @@ class ModelRun(submitit.helpers.Checkpointable):
 
                         wandb.log({
                             'Run': run,
+                            "Train ratio": train_ratio,
                             'Test | Target MAPE/val' : mape,
                             'Test | Target Corr/val': corr,
                             'Test | Train ratio' : train_ratio
@@ -375,6 +386,9 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 loss = 0
                 
                 optimizer.zero_grad()
+
+                features, targets, _ = filter_nans(features, targets)
+
                 features = features.to(device)
                 targets = targets.to(device)
 
@@ -429,6 +443,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                         if param.grad is not None:
                             wandb.log({
                                 "Epoch": epoch,
+                                'Run': run,
+                                "Train ratio": train_ratio,
                                 f"Gradient Norm/{name}": param.grad.norm().item()
                             })  
 
@@ -441,6 +457,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                     wandb.log({
                         'Epoch': epoch,
+                        'Run': run,
+                        "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                     })
 
@@ -448,6 +466,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['reduced_mat_recon_loss'] = reduced_mat_recon_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
+                        'Run': run,
+                        "Train ratio": train_ratio,
                         'reduced_mat_recon_loss': loss_terms_batch['reduced_mat_recon_loss'],
                     })
                 
@@ -455,6 +475,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['target_decoding_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
+                        'Run': run,
+                        "Train ratio": train_ratio,
                         'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
                     })
 
@@ -464,12 +486,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
+                        'Run': run,
+                        "Train ratio": train_ratio,
                         'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
                     })
                 
                 wandb.log({
                     'Epoch': epoch,
                     'Run': run,
+                    "Train ratio": train_ratio,
                     'total_loss': loss_terms_batch['loss'],
                 })
 
@@ -481,6 +506,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             corr_batch = 0
             with torch.no_grad():
                 for (features, targets) in test_loader:
+
+                    features, targets, _ = filter_nans(features, targets)
                     
                     features, targets = features.to(device), targets.to(device)                    
                     reduced_mat = model.encode_features(features)
@@ -490,8 +517,15 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     out_target_decoded = model.decode_targets(embedding_norm)
                     
                     epsilon = 1e-8
+
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
+                    if torch.isnan(mape):
+                        mape = torch.tensor(0.0)
+
                     corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
+                    if np.isnan(corr):
+                        corr = 0.0
+                        
                     mape_batch+=mape.item()
                     corr_batch += corr
 
@@ -500,6 +534,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 validation.append(mape_batch)
 
             wandb.log({
+                'Run': run,
+                "Train ratio": train_ratio,
                 'Target MAPE/val' : mape_batch,
                 'Target Corr/val': corr_batch,
                 })
@@ -525,7 +561,7 @@ def main(cfg: DictConfig):
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
 
-    random_state = np.random.RandomState(seed=42)
+    random_state = np.random.RandomState(seed=cfg.seed)
 
     dataset_path = cfg.dataset_path
 

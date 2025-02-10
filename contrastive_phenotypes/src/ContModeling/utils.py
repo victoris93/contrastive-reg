@@ -71,6 +71,36 @@ def mean_correlations_between_subjects(y_true, y_pred):
     
     return correlation
 
+def filter_nans_X(_X, indices = None):
+    nan_idx_X = torch.isnan(_X).any(dim=(1,2))
+    _X = _X[~nan_idx_X]
+    if indices is not None:
+        indices = indices[~nan_idx_X]
+        
+    return _X, indices
+
+def filter_nans_y(_y, indices = None):
+    nan_idx_y = torch.isnan(_y).squeeze()
+    _y = _y[~nan_idx_y]
+    if indices is not None:
+        indices = indices[~nan_idx_y]
+
+    return _y, indices
+
+def filter_nans(_X, _y, indices = None):
+    nan_idx_y = torch.isnan(_y).squeeze()
+    nan_idx_X = torch.isnan(_X).any(dim=(1,2))
+
+    nan_idx = nan_idx_X | nan_idx_y
+
+    _X = _X[~nan_idx]
+    _y = _y[~nan_idx]
+
+    if indices is not None:
+        indices = indices[~nan_idx]
+
+    return _X, _y, indices
+    
 def mean_correlation(y_true, y_pred):
     correlations = []
     y_true = y_true.cpu().detach().numpy()

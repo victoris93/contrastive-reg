@@ -1,5 +1,5 @@
-project: "PhenProjDistributed"
-experiment_name: "train_redmat_dec"
+project: "HCP_CL"
+experiment_name: "train_redmat_dec_hcp"
 hypothesis: "-"
 
 hydra:
@@ -12,6 +12,7 @@ output_dim_feat: 100
 hidden_dim: 128
 input_dim_target: 1
 output_dim_target: 64
+seed: 42
 
 # MatAutoencoder options
 skip_conn: False
@@ -20,30 +21,30 @@ ReEig: False
 
 # Pretrained models options
 full_model_pretrained: True
-mat_ae_pretrained: False
+mat_ae_pretrained: True
 reduced_mat_ae_pretrained: False
 
-pretrained_mat_ae_exp: "ext_mat_ae_abcd"
+pretrained_mat_ae_exp: "pretrain_mat_ae_hcp"
 pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
-pretrained_full_model_exp: "train_target_enc"
+pretrained_full_model_exp: "train_redmat_dec_hcp"
 
 mat_ae_enc_freeze: True
-mat_ae_dec_freeze: True
+mat_ae_dec_freeze: False
 
 reduced_mat_ae_enc_freeze: True
-reduced_mat_ae_dec_freeze: False
+reduced_mat_ae_dec_freeze: True
 
 target_dec_freeze: True
 
 
-best_mat_ae_fold: 4
+best_mat_ae_fold: 2
 best_reduced_mat_ae_fold: 4
 synth_exp: False
 
 # Training parameters
 multi_gpu: True
 num_epochs: 300
-batch_size: 128
+batch_size: 32
 n_runs: 10
 lr: 0.001
 weight_decay: 0
@@ -55,7 +56,7 @@ log_gradients: True
 clip_grad: True
 
 # test options
-external_test_mode: True # relevant if no part of the model is pretrained
+external_test_mode: False # relevant if no part of the model is pretrained
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -88,43 +89,9 @@ augmentation: None
 mat_threshold: 0
 # Paths for data
 # dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
-dataset_path: "/data/parietal/store/work/vshevche/data/abcd_dataset_400parcels.nc"
+dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
-    # - pea_wiscv_tss
-    # - nihtbx_picvocab_agecorrected
-    # - nihtbx_flanker_agecorrected
-    # - nihtbx_list_agecorrected 
-    # - nihtbx_cardsort_agecorrected
-    # - nihtbx_pattern_agecorrected
-    # - nihtbx_picture_agecorrected
-    # - nihtbx_reading_agecorrected
-    # - nihtbx_cryst_agecorrected
-    - nihtbx_totalcomp_agecorrected
-    # - age
-    # - benton_faces
-    # - cardio_measure_pulse_mean
-    # - cardio_measure_bp_sys_mean
-    # - cardio_measure_bp_dia_mean
-    # - cattell
-    # - ekman_em_hex_pca1
-    # - ekman_em_hex_pca1_expv
-    # - famous_faces
-    # - hotel_time
-    # - picture_priming_baseline_acc
-    # - picture_priming_baseline_rt
-    # - picture_priming_priming_prime
-    # - picture_priming_priming_target
-    # - proverbs
-    # - rt_choice
-    # - rt_simple
-    # - syn_sem_prop_error
-    # - syn_sem_rt
-    # - tip_of_tongue
-    # - VSTM_colour_K_mean
-    # - VSTM_colour_K_precision
-    # - VSTM_colour_K_doubt
-    # - VSTM_colour_MSE
-    
+    - PicVocab_AgeAdj
     
 standardize_targets: False
 

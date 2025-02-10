@@ -28,7 +28,14 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from geoopt.optim import RiemannianAdam
 import sys
-from .utils import mape_between_subjects, mean_correlations_between_subjects, save_embeddings, cauchy, gaussian_kernel
+from .utils import ( 
+    mape_between_subjects,
+    mean_correlations_between_subjects,
+    save_embeddings,
+    cauchy,
+    gaussian_kernel,
+    filter_nans
+)
 from .losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from .models import MatAutoEncoder, ReducedMatAutoEncoder, TargetDecoder
 from .viz_func import load_mape, load_recon_mats, load_true_mats, wandb_plot_test_recon_corr, wandb_plot_individual_recon
@@ -93,6 +100,8 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             batch = 1
             loss_terms_batch = defaultdict(lambda:0)
             for features, _ in train_loader:
+
+                features, _, _ = filter_nans(features, _)
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -125,6 +134,8 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
 
             with torch.no_grad():
                 for features, _ in val_loader:
+
+                    features, _, _ = filter_nans(features, _)
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
@@ -219,6 +230,8 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device,
             batch = 1
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets in train_loader:
+
+                features, targets, _ = filter_nans(features, targets)
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -258,6 +271,9 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device,
 
             with torch.no_grad():
                 for features, targets in val_loader:
+
+                    features, targets, _ = filter_nans(features, targets)
+
                     features = features.to(device)
                     targets = targets.to(device)
 
@@ -342,6 +358,8 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
 
     with torch.no_grad():
         for i, (features, _) in enumerate(test_loader):
+
+            features, _, _ = filter_nans(features, _)
 
             features = features.to(device)
 
@@ -428,6 +446,8 @@ def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir,
 
     with torch.no_grad():
         for i, (features, _) in enumerate(test_loader):
+
+            features, _, _ = filter_nans(features, _)
 
             features = features.to(device)
 

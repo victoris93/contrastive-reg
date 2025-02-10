@@ -119,11 +119,11 @@ class MatData(Dataset):
         return sim_matrices
 
     def __len__(self):
-        return self.data_array.subject.__len__()
+        return self.data_array.index.__len__()
     
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
-        target = torch.from_numpy(np.array([self.data_array.isel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        target = torch.from_numpy(np.array([self.data_array.isel(index=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
         
         return matrix, target
 
