@@ -22,10 +22,9 @@ ref_mat = matrices[0]
 
 vars = []
 for idx in sub_idx:
-    if idx != 0:
-        mat = data.matrices.isel(index = idx).values
-        var_shift = (ref_mat - mat) ** 2
-        vars.append(var_shift)
+    mat = data.matrices.isel(index = idx).values
+    var_shift = (ref_mat - mat) ** 2
+    vars.append(var_shift)
 
 vars = np.array(vars)
 np.save(f"{exp_dir}/embeddings/conn_var_{dataset}.npy", vars)
