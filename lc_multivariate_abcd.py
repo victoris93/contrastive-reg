@@ -72,8 +72,6 @@ class ModelRun(submitit.helpers.Checkpointable):
                 print(f"Device {device}, ratio {train_ratio}", flush=True)
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
-
-            augmentations = cfg.augmentation
             
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
@@ -113,6 +111,9 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
             train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
+            train_inter_network_conn = train_dataset.dataset.inter_network_conn[train_dataset.indices]
+            train_intra_network_conn = train_dataset.dataset.intra_network_conn[train_dataset.indices]
+
             std_train_targets, mean, std = standardize(train_targets)
             # scaler = MinMaxScaler().fit(train_targets)
             # train_targets = scaler.transform(train_targets)
@@ -123,41 +124,24 @@ class ModelRun(submitit.helpers.Checkpointable):
             ## Weight initialization for bilinear layer
             mean_f = torch.mean(train_features, dim=0).to(device)
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
-            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
+            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
+
             test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
             test_targets = test_dataset.dataset.targets[test_dataset.indices].numpy()
-            # test_targets = scaler.transform(test_targets)
+            test_inter_network_conn = test_dataset.dataset.inter_network_conn[test_dataset.indices]
+            test_intra_network_conn = test_dataset.dataset.intra_network_conn[test_dataset.indices]
 
-            ### Augmentation
-            if augmentations != 'None':
-#                 aug_params = {}
-                if not isinstance(augmentations, list):
-                    augmentations = [augmentations]
-                n_augs = len(augmentations)
-                vect_train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                n_samples = len(train_dataset)
-                n_features = vect_train_features.shape[-1]
-                new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
-                new_train_features[:n_samples, 0, :] = vect_train_features
-
-                for i, aug in enumerate(augmentations):
-                    transform = augs[aug]
-                    transform_args = aug_args[aug]
-#                     aug_params[aug] = transform_args # to save later in the metrics df
-
-                    num_aug = i + 1
-                    aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
-                    aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
-
-                    new_train_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
-
-                train_features = new_train_features
-                train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
+            train_dataset = TensorDataset(train_features,
+                                          torch.from_numpy(train_targets).to(torch.float32),
+                                          train_inter_network_conn,
+                                          train_intra_network_conn)
             
-            train_dataset = TensorDataset(train_features, torch.from_numpy(train_targets).to(torch.float32))
-            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
+            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32),
+                                         torch.from_numpy(test_targets).to(torch.float32),
+                                         test_inter_network_conn,
+                                         test_intra_network_conn)
 
-            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
+            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
 
             mean = torch.tensor(mean).to(device) #do we need this?
@@ -174,21 +158,16 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             model.eval()
             with torch.no_grad():
-                train_dataset = Subset(dataset, train_indices)
-                train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
-                train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
-                train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
-                std_train_targets,_,_ = standardize(train_targets)
-
                 for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
+
                     is_test = True
                     if label == 'train':
                         is_test = False
                     
-                    X, y = zip(*d)
+                    X, y, _, _ = zip(*d)
                     X = torch.stack(X)
                     y = torch.stack(y)
-                    X, y, d_indices = filter_nans(X, y, d_indices)
+                    X, y, d_indices, _ = filter_nans(X, y, d_indices)
                     X = X.to(device)
                     y = y.to(device)
 
@@ -381,16 +360,17 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 model.target_dec.eval()
                 
             loss_terms_batch = defaultdict(lambda:0)
-            for features, targets in train_loader:
+            for features, targets, inter_network_conn, _ in train_loader:
 
                 loss = 0
                 
                 optimizer.zero_grad()
 
-                features, targets, _ = filter_nans(features, targets)
+                features, targets, _, inter_network_conn = filter_nans(features, targets, _z=inter_network_conn)
 
                 features = features.to(device)
                 targets = targets.to(device)
+                inter_network_conn = inter_network_conn.to(device)
 
                 ## FEATURE ENCODING == MATRIX REDUCTION
                 embedded_feat = model.encode_features(features)
@@ -422,8 +402,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 if not cfg.reduced_mat_ae_enc_freeze:
                     ## KERNLIZED LOSS: MAT embedding vs targets
                     kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
-                    kernel_embedded_target_loss = 1000 * kernel_embedded_target_loss
-                    loss += kernel_embedded_target_loss
+                    kernel_embedded_network_loss, _ = criterion_pft(reduced_mat_embedding_norm.unsqueeze(1), inter_network_conn)
+                    loss += (kernel_embedded_target_loss + kernel_embedded_network_loss)
 
                 if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 1000
@@ -454,12 +434,14 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                 if not cfg.reduced_mat_ae_enc_freeze:
                     loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
+                    loss_terms_batch['kernel_embedded_network_loss'] = kernel_embedded_network_loss.item() / len(features)
 
                     wandb.log({
                         'Epoch': epoch,
                         'Run': run,
                         "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
+                        'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
                     })
 
                 if not cfg.reduced_mat_ae_dec_freeze:
@@ -505,9 +487,9 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             mape_batch = 0
             corr_batch = 0
             with torch.no_grad():
-                for (features, targets) in test_loader:
+                for features, targets, _, _ in test_loader:
 
-                    features, targets, _ = filter_nans(features, targets)
+                    features, targets, _, _ = filter_nans(features, targets)
                     
                     features, targets = features.to(device), targets.to(device)                    
                     reduced_mat = model.encode_features(features)

@@ -12,7 +12,7 @@ dataset = sys.argv[2]
 
 exp_dir = f'{root}/results/{exp_name}'
 predictions = pd.read_csv(f'{exp_dir}/pred_results.csv')
-predictions = predictions[(predictions["dataset"] == dataset) & (predictions["train_ratio"] == 1)]
+predictions = predictions[(predictions["dataset"] == dataset) & (predictions["train_ratio"] == 1) & (predictions["model_run"] == 0)]
 sub_idx = predictions.indices.values
 embeddings = np.load(f"{exp_dir}/embeddings/joint_embeddings_run0_{dataset}.npy")
 n_neighbors = int(sys.argv[3])
@@ -20,10 +20,9 @@ step = int(sys.argv[4])
 
 neigh = NearestNeighbors(n_neighbors=n_neighbors, radius=1, algorithm='brute', metric = 'cosine', p = 2).fit(embeddings)
 distances, neighbors = neigh.kneighbors(embeddings, return_distance = True)
-data =  xr.open_dataset(f'{root}/data/abcd_dataset_400parcels.nc')
+data =  xr.open_dataset(f'{root}/data/hcp_kong_400parcels.nc')
 
 neigh_conn_var = []
-
 
 for neighborhood in tqdm(neighbors[0::step]):
     neighborhood_idx = neighborhood[0]
@@ -31,7 +30,7 @@ for neighborhood in tqdm(neighbors[0::step]):
     var = 0
     dist_neigh = distances[neighborhood_idx]
     neigh_indices= sub_idx[neighborhood]
-    neigh_matrices = data.matrices.isel(subject = neigh_indices).values
+    neigh_matrices = data.matrices.isel(index = neigh_indices).values
     centroid = neigh_matrices[0]
 
     for mat_idx, mat in enumerate(neigh_matrices):

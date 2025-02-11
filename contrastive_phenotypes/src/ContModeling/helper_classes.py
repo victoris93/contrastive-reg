@@ -78,6 +78,9 @@ class MatData(Dataset):
         else:
             self.matrices = self.data_array.matrices.values.astype(np.float32)
 
+        self.intra_network_conn = torch.from_numpy(self.data_array.intra_network_conn.values).to(torch.float32)
+        self.inter_network_conn = torch.from_numpy(self.data_array.inter_network_conn.values).to(torch.float32)
+
         if vectorize:
             self.matrices = sym_matrix_to_vec(self.matrices)
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
@@ -124,7 +127,8 @@ class MatData(Dataset):
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
         target = torch.from_numpy(np.array([self.data_array.isel(index=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        intra_network_conn_vect = self.intra_network_conn[idx]
+        inter_network_conn_vect = self.inter_network_conn[idx]
         
-        return matrix, target
-
+        return matrix, target, intra_network_conn_vect, inter_network_conn_vect
 

@@ -1,5 +1,5 @@
-project: "HCP_CL"
-experiment_name: "train_redmat_dec_hcp"
+project: "HCP_CL_NET_SUP"
+experiment_name: "train_redmat_enc_hcp_network"
 hypothesis: "-"
 
 hydra:
@@ -20,22 +20,21 @@ skip_enc1: False
 ReEig: False
 
 # Pretrained models options
-full_model_pretrained: True
+full_model_pretrained: False
 mat_ae_pretrained: True
 reduced_mat_ae_pretrained: False
 
 pretrained_mat_ae_exp: "pretrain_mat_ae_hcp"
 pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
-pretrained_full_model_exp: "train_redmat_dec_hcp"
+pretrained_full_model_exp: "train_redmat_enc_hcp_network"
 
 mat_ae_enc_freeze: True
-mat_ae_dec_freeze: False
+mat_ae_dec_freeze: True
 
-reduced_mat_ae_enc_freeze: True
+reduced_mat_ae_enc_freeze: False
 reduced_mat_ae_dec_freeze: True
 
 target_dec_freeze: True
-
 
 best_mat_ae_fold: 2
 best_reduced_mat_ae_fold: 4

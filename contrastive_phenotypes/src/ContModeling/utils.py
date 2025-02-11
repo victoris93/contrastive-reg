@@ -87,7 +87,7 @@ def filter_nans_y(_y, indices = None):
 
     return _y, indices
 
-def filter_nans(_X, _y, indices = None):
+def filter_nans(_X, _y, indices = None, _z = None):
     nan_idx_y = torch.isnan(_y).squeeze()
     nan_idx_X = torch.isnan(_X).any(dim=(1,2))
 
@@ -96,10 +96,13 @@ def filter_nans(_X, _y, indices = None):
     _X = _X[~nan_idx]
     _y = _y[~nan_idx]
 
+    if _z is not None:
+        _z = _z[~nan_idx]
+
     if indices is not None:
         indices = indices[~nan_idx]
 
-    return _X, _y, indices
+    return _X, _y, indices, _z
     
 def mean_correlation(y_true, y_pred):
     correlations = []
