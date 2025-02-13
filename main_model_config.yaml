@@ -1,43 +1,61 @@
-project: "PhenProj | MatAE Pretrained"
-experiment_name: "exp"
+project: "HCP_CL_NET_SUP"
+experiment_name: "train_redmat_enc_hcp_network"
 hypothesis: "-"
+
+hydra:
+  run:
+    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 70
-hidden_dim: 100
+output_dim_feat: 100
+hidden_dim: 128
 input_dim_target: 1
-output_dim_target: 3
+output_dim_target: 64
+seed: 42
 
 # MatAutoencoder options
+skip_conn: False
 skip_enc1: False
 ReEig: False
 
 # Pretrained models options
+full_model_pretrained: False
 mat_ae_pretrained: True
-target_ae_pretrained: False
-pretrained_mat_ae_exp: "external_mat_ae_abcd"
-pretrained_target_ae_exp: "target_ae"
-best_mat_ae_fold: 3
-best_target_ae_fold: 1
+reduced_mat_ae_pretrained: False
+
+pretrained_mat_ae_exp: "pretrain_mat_ae_hcp"
+pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
+pretrained_full_model_exp: "train_redmat_enc_hcp_network"
+
+mat_ae_enc_freeze: True
+mat_ae_dec_freeze: True
+
+reduced_mat_ae_enc_freeze: False
+reduced_mat_ae_dec_freeze: True
+
+target_dec_freeze: True
+
+best_mat_ae_fold: 2
+best_reduced_mat_ae_fold: 4
 synth_exp: False
 
 # Training parameters
 multi_gpu: True
-num_epochs: 100
-batch_size: 64
-n_runs: 1 # set 1 if some part of the model is pretrained (the test set should be the same)
+num_epochs: 300
+batch_size: 32
+n_runs: 10
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
-scheduler_patience: 10
-test_ratio: 0.3 # makes no difference if some part of the model is pretrained
-train_ratio: 1.0
+scheduler_patience: 20
+test_ratio: 0.3 # makes no difference if some part of the model is pretrained or external test mode
+train_ratio: [0.1, 0.3, 0.5, 0.7, 1.0] # multiple values for a learning curve
 log_gradients: True
 clip_grad: True
 
 # test options
-external_test_mode: True
+external_test_mode: False # relevant if no part of the model is pretrained
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -45,18 +63,19 @@ test_scanners:
 
 # Contrastive loss parameters
 SupCon_kernel: cauchy
+SupConLoss_on_mat: False
 
 ## feature proj vs. targets
 pft_base_temperature: 0.07
 pft_temperature: 0.07
-pft_sigma_univar: 1.0
-pft_sigma_multivar: 1.0
-reg_term: 0.01
+pft_sigma: 1
+pft_reg_term: 0.01
 
 ## target proj vs. targets
-ptt_base_temperature: 0.005
-ptt_temperature: 0.005
+ptt_base_temperature: 0.07
+ptt_temperature: 0.07
 ptt_sigma: 1
+ptt_reg_term: 0.01
 
 # Other losses
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
@@ -68,14 +87,21 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
+# dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
+dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
-    - nihtbx_totalcomp_agecorrected
+    - PicVocab_AgeAdj
+    
 standardize_targets: False
 
 # Directory for saving results
-work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
-reconstructed_dir : recon_mat
+# work_dir: "/well/margulies/users/cpy397/contrastive-learning"
+# reconstructed_dir : recon_mat
+# embedding_dir : embeddings
+# model_weight_dir : saved_models
+# output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
+work_dir: "/data/parietal/store/work/vshevche"
 embedding_dir : embeddings
+reconstructed_dir : recon_mat
 model_weight_dir : saved_models
-output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
+output_dir: "/data/parietal/store/work/vshevche/results"

@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from PIL import Image
 from scipy.linalg import issymmetric
+from .utils import filter_nans_X
 import os
 import re
 from tqdm import tqdm
@@ -112,26 +113,30 @@ def compute_batch_elementwise_correlation(true, recon):
     return correlations
 
 
-def load_recon_mats(exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
+def load_recon_mats(exp_name, work_dir, vectorize, is_full_model=False, reduced_mat=False, run_num=None):
     recon_path_suffix = ""
     if is_full_model:
         recon_path_suffix = f"_run{run_num}"
-
+    mat_type_suffix = "recon_"
+    mat_type_suffix = mat_type_suffix + "reduced_mat" if reduced_mat else mat_type_suffix + "mat"
+    
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    recon_mat_files = [file for file in os.listdir(recon_mat_dir) if f"recon_mat" in file and recon_path_suffix in file]
+    recon_mat_files = [file for file in os.listdir(recon_mat_dir) if mat_type_suffix in file and recon_path_suffix in file]
     recon_mat_files = sorted(recon_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     recon_paths = [os.path.join(recon_mat_dir, file) for file in recon_mat_files]
     recon_mat = np.concatenate([np.load(path) for path in recon_paths])
-    
-    for i in range(recon_mat.shape[0]):
-        np.fill_diagonal(recon_mat[i], 1.0)
-    
+
+    if reduced_mat:
+        recon_mat = vec_to_sym_matrix(recon_mat)
+    else:
+        for i in range(recon_mat.shape[0]):
+            np.fill_diagonal(recon_mat[i], 1.0)
     if vectorize:
         recon_mat = sym_matrix_to_vec(recon_mat, discard_diagonal = True)
     return recon_mat
 
-def load_true_mats(data_path, exp_name, work_dir, vectorize, is_full_model = False, run_num = None):
+def load_true_mats(data_path, exp_name, work_dir, vectorize=False, reduced_mat=False,  is_full_model=False, run_num=None):
     recon_path_suffix = ""
     if is_full_model:
         recon_path_suffix = f"_run{run_num}"
@@ -139,7 +144,12 @@ def load_true_mats(data_path, exp_name, work_dir, vectorize, is_full_model = Fal
     test_idx_path = f"{work_dir}/results/{exp_name}/test_idx{recon_path_suffix}.npy"
     test_idx = np.load(test_idx_path)
     dataset = xr.open_dataset(data_path)
-    true_mat = dataset.matrices.isel(subject = test_idx).values
+    if reduced_mat:
+        true_mat = dataset.reduced_matrices.isel(index = test_idx).values
+    else:
+        true_mat = dataset.matrices.isel(index = test_idx).values
+    true_mat, _ = filter_nans_X(true_mat)
+
     if vectorize:
         true_mat = sym_matrix_to_vec(true_mat, discard_diagonal = True)
     return true_mat
@@ -150,7 +160,7 @@ def load_mape(exp_name, work_dir, is_full_model = False, run_num = None):
         recon_path_suffix = f"_run{run_num}"
     exp_dir = f"{work_dir}/results/{exp_name}"
     recon_mat_dir = f"{exp_dir}/recon_mat"
-    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if f"mape_mat{recon_path_suffix}" in file])
+    mape_mat_files = sorted([file for file in os.listdir(recon_mat_dir) if "mape" in file and recon_path_suffix in file])
     mape_mat_files = sorted(mape_mat_files, key=lambda x: int(re.search(r'batch_(\d+)', x)[1]))
     mape_paths = [os.path.join(recon_mat_dir, file) for file in mape_mat_files]
     mape_mat = np.concatenate([np.load(path) for path in mape_paths])

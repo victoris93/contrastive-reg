@@ -4,6 +4,7 @@ import torch.optim as optim
 from cmath import isinf
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Subset
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 import numpy as np
 import os
 import sys
@@ -66,13 +67,22 @@ class FoldTrain(submitit.helpers.Checkpointable):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, synth_exp, threshold=0):
+    def __init__(self, dataset_path, target_names, synth_exp=False, reduced_mat=False, vectorize=False, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
         self.threshold = threshold
         self.data_array = xr.open_dataset(dataset_path)
-        self.matrices = self.data_array.matrices.values.astype(np.float32)
+        if reduced_mat:
+            self.matrices = self.data_array.reduced_matrices.values.astype(np.float32)
+        else:
+            self.matrices = self.data_array.matrices.values.astype(np.float32)
+
+        self.intra_network_conn = torch.from_numpy(self.data_array.intra_network_conn.values).to(torch.float32)
+        self.inter_network_conn = torch.from_numpy(self.data_array.inter_network_conn.values).to(torch.float32)
+
+        if vectorize:
+            self.matrices = sym_matrix_to_vec(self.matrices)
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
 
         if threshold > 0:
@@ -83,7 +93,7 @@ class MatData(Dataset):
             self.matrices = self.simulate_effect(self.matrices, self.targets)
 
         self.matrices = torch.from_numpy(self.matrices).to(torch.float32)
-        self.target = torch.from_numpy(self.targets).to(torch.float32)
+        self.targets = torch.from_numpy(self.targets).to(torch.float32)
 
         gc.collect()
 
@@ -112,12 +122,13 @@ class MatData(Dataset):
         return sim_matrices
 
     def __len__(self):
-        return self.data_array.subject.__len__()
+        return self.data_array.index.__len__()
     
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
-        target = torch.from_numpy(np.array([self.data_array.isel(subject=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        target = torch.from_numpy(np.array([self.data_array.isel(index=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        intra_network_conn_vect = self.intra_network_conn[idx]
+        inter_network_conn_vect = self.inter_network_conn[idx]
         
-        return matrix, target
-
+        return matrix, target, intra_network_conn_vect, inter_network_conn_vect
 

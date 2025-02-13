@@ -17,8 +17,7 @@ class KernelizedSupCon(nn.Module):
         contrast_mode: str = "all",
         base_temperature: float = 0.07,
         reg_term: float = 1.0,
-        krnl_sigma_univar: float = 1.0,
-        krnl_sigma_multivar: float = 1.0,
+        krnl_sigma: float = 1.0,
         kernel: callable = None,
         delta_reduction: str = "sum",
     ):
@@ -29,8 +28,7 @@ class KernelizedSupCon(nn.Module):
         self.reg_term = reg_term
         self.method = method
         self.kernel = kernel
-        self.krnl_sigma_univar = krnl_sigma_univar
-        self.krnl_sigma_multivar = krnl_sigma_multivar
+        self.krnl_sigma = krnl_sigma
         self.delta_reduction = delta_reduction
 
         if kernel is not None and method == "supcon":
@@ -49,7 +47,7 @@ class KernelizedSupCon(nn.Module):
         )
     
     def direction_reg(self, features): # reg term is gamma in Mohan et al. 2020
-        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma_multivar)
+        feat_mask = self.kernel(features, krnl_sigma=self.krnl_sigma)
         direction_reg = self.reg_term * feat_mask
         return direction_reg
 
@@ -90,7 +88,7 @@ class KernelizedSupCon(nn.Module):
                 mask = scaler.fit_transform(mask.cpu().numpy())
                 mask = torch.tensor(mask, device=device).to(torch.float64)
             else:
-                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma_univar)
+                mask = self.kernel(labels, krnl_sigma=self.krnl_sigma)
 
         view_count = features.shape[1]
         features = torch.cat(torch.unbind(features, dim=1), dim=0)
@@ -118,10 +116,13 @@ class KernelizedSupCon(nn.Module):
         anchor_dot_contrast = torch.div(
             torch.matmul(features, features.T), self.temperature
         )
+        # print("anchor_dot_contrast", anchor_dot_contrast)
 
         # for numerical stability
         logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        # print("logits_max", logits_max)
         logits = anchor_dot_contrast - logits_max.detach()
+        # print("logits", logits)
 
         alignment = logits
 
@@ -129,6 +130,7 @@ class KernelizedSupCon(nn.Module):
         # - supcon if kernel = none
         # - y-aware is kernel != none
         uniformity = torch.exp(logits) * inv_diagonal
+        # print("uniformity", uniformity)
 
         if self.method == "threshold":
             repeated = mask.unsqueeze(-1).repeat(
@@ -150,28 +152,46 @@ class KernelizedSupCon(nn.Module):
 
         elif self.method == "expw":
             # exp weight e^(s_j(1-w_j))
-            uniformity = torch.exp(logits * (1 - mask)) * inv_diagonal
+            uniformity = (torch.exp(logits * (1 - mask)) + 1e-6) * inv_diagonal
+
+        # print("uniformity", uniformity)
 
         uniformity = torch.log(uniformity.sum(1, keepdim=True))
+        # print("uniformity", uniformity)
 
         # positive mask contains the anchor-positive pairs
         # excluding <self,self> on the diagonal
-        positive_mask = mask * inv_diagonal
-        direction_reg =  torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
-
+        positive_mask = mask  * inv_diagonal
+        # print("positive_mask", positive_mask)
+        direction_reg = torch.abs((self.direction_reg(features) * inv_diagonal - positive_mask).sum(1))
 
         log_prob = (
             alignment - uniformity # this is not in the formula
         )  # log(alignment/uniformity) = log(alignment) - log(uniformity)
+        # print("log_prob", log_prob)
         log_prob = (positive_mask * log_prob).sum(1) / positive_mask.sum(
             1
         )  # compute mean of log-likelihood over positive
 
+        # print("log_prob", log_prob.mean())
         # loss
 
         loss = -(self.temperature / self.base_temperature) * log_prob
 
-        return loss.mean() + direction_reg.mean(), direction_reg.mean()
+        return loss.mean(), direction_reg.mean()
+
+
+class OutlierRobustMSE(nn.Module):
+    def __init__(self, lmbd = 0.5):
+        super(OutlierRobustMSE, self).__init__()
+        self.lmbd = lmbd
+
+    def forward(self, targets, pred):
+        targets_standardized = torch.abs((targets - 100) / 15)
+        base_mse = nn.functional.mse_loss(targets, pred)
+        penalty = torch.exp(1 + targets_standardized).sum() * (1 - 1/(torch.abs(targets-pred)/targets).sum())
+        mse_with_outlier_penalty = base_mse + penalty
+        return mse_with_outlier_penalty
 
 
 class LogEuclideanLoss(nn.Module):

@@ -46,8 +46,8 @@ def main(cfg: DictConfig):
     model_params_dir = os.path.join(results_dir, cfg.model_weight_dir)
     os.makedirs(model_params_dir, exist_ok=True)
 
-    test_mat_autoencoder(best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
-                            recon_mat_dir = recon_mat_dir, device = device)
+    test_mat_autoencoder(best_fold=best_fold, test_dataset=test_dataset, cfg=cfg, model_params_dir=model_params_dir,
+                            recon_mat_dir=recon_mat_dir, device=device)
 
 if __name__ == "__main__":
     main()
