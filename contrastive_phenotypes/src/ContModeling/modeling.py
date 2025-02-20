@@ -34,7 +34,8 @@ from .utils import (
     save_embeddings,
     cauchy,
     gaussian_kernel,
-    filter_nans
+    filter_nans,
+    filter_nans_X
 )
 from .losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
 from .models import MatAutoEncoder, ReducedMatAutoEncoder, TargetDecoder
@@ -99,9 +100,9 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
         for epoch in pbar:
             batch = 1
             loss_terms_batch = defaultdict(lambda:0)
-            for features, _ in train_loader:
+            for features, _, _, _ in train_loader:
 
-                features, _, _ = filter_nans(features, _)
+                features, _ = filter_nans_X(features)
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -133,9 +134,9 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             val_mape = 0
 
             with torch.no_grad():
-                for features, _ in val_loader:
+                for features, _, _, _ in val_loader:
 
-                    features, _, _ = filter_nans(features, _)
+                    features, _ = filter_nans_X(features)
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
@@ -229,9 +230,9 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device,
         for epoch in pbar:
             batch = 1
             loss_terms_batch = defaultdict(lambda:0)
-            for features, targets in train_loader:
+            for features, targets, _, _ in train_loader:
 
-                features, targets, _ = filter_nans(features, targets)
+                features, targets, _, _ = filter_nans(features, targets)
                 
                 optimizer_autoencoder.zero_grad()
                 features = features.to(device)
@@ -270,9 +271,9 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device,
             val_mape = 0
 
             with torch.no_grad():
-                for features, targets in val_loader:
+                for features, targets, _, _ in val_loader:
 
-                    features, targets, _ = filter_nans(features, targets)
+                    features, targets, _, _ = filter_nans(features, targets)
 
                     features = features.to(device)
                     targets = targets.to(device)
@@ -357,9 +358,9 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
         raise ValueError("Unsupported loss function specified in config")
 
     with torch.no_grad():
-        for i, (features, _) in enumerate(test_loader):
+        for i, (features, _, _, _) in enumerate(test_loader):
 
-            features, _, _ = filter_nans(features, _)
+            features, _, _, _= filter_nans(features, _)
 
             features = features.to(device)
 
@@ -445,9 +446,9 @@ def test_reduced_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir,
         raise ValueError("Unsupported loss function specified in config")
 
     with torch.no_grad():
-        for i, (features, _) in enumerate(test_loader):
+        for i, (features, _, _, _) in enumerate(test_loader):
 
-            features, _, _ = filter_nans(features, _)
+            features, _ = filter_nans_X(features)
 
             features = features.to(device)
 

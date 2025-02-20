@@ -1,9 +1,9 @@
 project: "MatAE"
 experiment_name: "pretrain_mat_ae_hcp"
 
-hydra:
-  run:
-    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+# hydra:
+#   run:
+#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 hypothesis: "-"
 # Training parameters
@@ -52,13 +52,13 @@ SupCon_kernel: cauchy
 best_fold: 2
 
 # Paths for data
-dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/hcp_kong_400parcels.nc"
 targets:
     - CogTotalComp_AgeAdj # used is supervised
 
 # Directory for saving results
-work_dir: "/data/parietal/store/work/vshevche"
-embedding_dir : embeddings
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
+embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/data/parietal/store/work/vshevche/results"
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"

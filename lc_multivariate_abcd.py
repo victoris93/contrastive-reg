@@ -439,6 +439,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     wandb.log({
                         'Epoch': epoch,
                         'Run': run,
+                        "lr": optimizer.param_groups[0]['lr'],
                         "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                         'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
@@ -569,7 +570,7 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=120,
-            slurm_partition="gpu",
+            slurm_partition="gpu_short",
             gpus_per_node=1,
             tasks_per_node=1,
             nodes=1

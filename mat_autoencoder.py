@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
         executor = submitit.AutoExecutor(folder=str(log_folder / "%j"))
         executor.update_parameters(
             timeout_min=240,
-            slurm_partition="gpu",
+            slurm_partition="gpu_short",
             gpus_per_node=1,
             # tasks_per_node=1,
             # nodes=1
@@ -118,7 +118,7 @@ def main(cfg: DictConfig):
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
     executor.update_parameters(
             timeout_min=240,
-            slurm_partition="gpu",
+            slurm_partition="gpu_short",
             gpus_per_node=1,
             # tasks_per_node=1,
             # nodes=1

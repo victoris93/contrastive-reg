@@ -88,9 +88,12 @@ def filter_nans_y(_y, indices = None):
     return _y, indices
 
 def filter_nans(_X, _y, indices = None, _z = None):
-    nan_idx_y = torch.isnan(_y).squeeze()
+    if len(_y.shape) > 1:
+        nan_idx_y = torch.isnan(_y).any(dim=1)
+    else:
+        nan_idx_y = torch.isnan(_y).squeeze()
+        
     nan_idx_X = torch.isnan(_X).any(dim=(1,2))
-
     nan_idx = nan_idx_X | nan_idx_y
 
     _X = _X[~nan_idx]
@@ -179,6 +182,12 @@ def standardize_dataset(dataset):
     standardized_dataset = TensorDataset(standardized_features, standardized_targets)
     
     return standardized_dataset
+
+def rbf(x, krnl_sigma):
+    if len(x.shape) == 1:
+        x = x.view(-1, 1)
+    x = torch.cdist(x, x, p=2)
+    return torch.exp(-(x ** 2) / (2 * (krnl_sigma ** 2)))
 
 def gaussian_kernel(x, krnl_sigma):
     if x.shape[-1] > 1:

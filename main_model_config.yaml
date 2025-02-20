@@ -1,10 +1,10 @@
-project: "HCP_CL_NET_SUP"
-experiment_name: "train_redmat_enc_hcp_network"
+project: "HCP_CL_REDMAT_ENC"
+experiment_name: "train_redmat_enc_hcp_sup_net_thresholded"
 hypothesis: "-"
 
-hydra:
-  run:
-    dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+# hydra:
+#   run:
+#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 # Model dimensions
 input_dim_feat: 400
@@ -26,7 +26,7 @@ reduced_mat_ae_pretrained: False
 
 pretrained_mat_ae_exp: "pretrain_mat_ae_hcp"
 pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
-pretrained_full_model_exp: "train_redmat_enc_hcp_network"
+pretrained_full_model_exp: "train_redmat_enc_hcp_sup_net"
 
 mat_ae_enc_freeze: True
 mat_ae_dec_freeze: True
@@ -46,7 +46,7 @@ num_epochs: 300
 batch_size: 32
 n_runs: 10
 lr: 0.001
-weight_decay: 0
+weight_decay: 0.0001
 dropout_rate: 0
 scheduler_patience: 20
 test_ratio: 0.3 # makes no difference if some part of the model is pretrained or external test mode
@@ -68,13 +68,13 @@ SupConLoss_on_mat: False
 ## feature proj vs. targets
 pft_base_temperature: 0.07
 pft_temperature: 0.07
-pft_sigma: 1
+pft_sigma: 0.025
 pft_reg_term: 0.01
 
 ## target proj vs. targets
 ptt_base_temperature: 0.07
 ptt_temperature: 0.07
-ptt_sigma: 1
+ptt_sigma: 20
 ptt_reg_term: 0.01
 
 # Other losses
@@ -87,21 +87,21 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-# dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/abcd_dataset_400parcels_1.nc"
-dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/hcp_kong_400parcels.nc"
+# dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
     - PicVocab_AgeAdj
     
 standardize_targets: False
 
 # Directory for saving results
-# work_dir: "/well/margulies/users/cpy397/contrastive-learning"
-# reconstructed_dir : recon_mat
-# embedding_dir : embeddings
-# model_weight_dir : saved_models
-# output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
-work_dir: "/data/parietal/store/work/vshevche"
-embedding_dir : embeddings
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
+embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/data/parietal/store/work/vshevche/results"
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
+# work_dir: "/data/parietal/store/work/vshevche"
+# embedding_dir : embeddings
+# reconstructed_dir : recon_mat
+# model_weight_dir : saved_models
+# output_dir: "/data/parietal/store/work/vshevche/results"
