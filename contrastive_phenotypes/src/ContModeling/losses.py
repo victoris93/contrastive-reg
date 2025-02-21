@@ -82,14 +82,16 @@ class KernelizedSupCon(nn.Module):
             #if labels.shape[0] != batch_size:
             #    raise ValueError("Num of labels does not match num of features")
 
+            # if self.kernel is None:
+            #     scaler = MinMaxScaler()
+            #     mask = -torch.cdist(labels, labels)
+            #     mask = scaler.fit_transform(mask.cpu().numpy())
+            #     mask = torch.tensor(mask, device=device).to(torch.float64)
             if self.kernel is None:
-                scaler = MinMaxScaler()
-                mask = -torch.cdist(labels, labels)
-                mask = scaler.fit_transform(mask.cpu().numpy())
-                mask = torch.tensor(mask, device=device).to(torch.float64)
+                mask = torch.eq(labels, labels.T)
             else:
                 mask = self.kernel(labels, krnl_sigma=self.krnl_sigma)
-
+                
         view_count = features.shape[1]
         features = torch.cat(torch.unbind(features, dim=1), dim=0)
         if self.contrast_mode == "one":
