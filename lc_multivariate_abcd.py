@@ -189,6 +189,7 @@ class ModelRun(submitit.helpers.Checkpointable):
 
                         np.save(f'{recon_mat_dir}/recon_mat_run{run}', recon_mat.cpu().numpy())
                         np.save(f'{recon_mat_dir}/mape_mat_run{run}', mape_mat.cpu().numpy())
+
                     y_pred = model.decode_targets(X_emb_reduced_norm)
 
                     save_embeddings(X_embedded, "mat", cfg, is_test, run)
@@ -227,7 +228,11 @@ class ModelRun(submitit.helpers.Checkpointable):
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
-        
+
+    def checkpoint(self, *args, **kwargs):
+        print("Checkpointing", flush=True)
+        return super().checkpoint(*args, **kwargs)
+
 def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
     print("Start training...")
 
@@ -311,7 +316,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             param.requires_grad = False
 
     criterion_pft = KernelizedSupCon(
-        method="expw",
+        method="yaware",
         temperature=cfg.pft_temperature,
         base_temperature= cfg.pft_base_temperature,
         reg_term = cfg.pft_reg_term,
@@ -320,18 +325,19 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     )
 
     criterion_ptt = KernelizedSupCon(
-        method="expw",
+        method="yaware",
         temperature=cfg.ptt_temperature,
         base_temperature= cfg.ptt_base_temperature,
         reg_term = cfg.ptt_reg_term,
         kernel=kernel,
         krnl_sigma=cfg.ptt_sigma,
     )
-    
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
     target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=cfg.lr, weight_decay=weight_decay,
+    #                             momentum=0.9)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
 
     loss_terms = []
@@ -339,13 +345,13 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     autoencoder_features = []
 
     gc.collect()
-    
+
     wandb.init(project=cfg.project,
         mode = "offline",
         name=f"{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
         dir = cfg.output_dir,
         config = OmegaConf.to_container(cfg, resolve=True))
-
+    
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
@@ -361,7 +367,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 
             loss_terms_batch = defaultdict(lambda:0)
             for features, targets, inter_network_conn, _ in train_loader:
-
                 loss = 0
                 
                 optimizer.zero_grad()
@@ -439,7 +444,6 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     wandb.log({
                         'Epoch': epoch,
                         'Run': run,
-                        "lr": optimizer.param_groups[0]['lr'],
                         "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                         'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
@@ -504,12 +508,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
                     if torch.isnan(mape):
                         mape = torch.tensor(0.0)
-
+                    
                     corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
                     if np.isnan(corr):
                         corr = 0.0
                         
-                    mape_batch+=mape.item()
+                    mape_batch += mape.item()
                     corr_batch += corr
 
                 mape_batch = mape_batch/len(test_loader)
@@ -524,7 +528,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                 })
             
             scheduler.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -5:
+            if np.log10(scheduler._last_lr[0]) < -7:
                 break
 
             pbar.set_postfix_str(
