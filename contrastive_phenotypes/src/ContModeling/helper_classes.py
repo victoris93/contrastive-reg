@@ -83,13 +83,14 @@ class MatData(Dataset):
 
         if vectorize:
             self.matrices = sym_matrix_to_vec(self.matrices)
+            
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
         
         if standardize_target:
             for i, target_name in enumerate(self.target_names):
                 print(f"Standardizing target {target_name} (min: {self.targets[i].min()}, max: {self.targets[i].max()}) to [0, 1]")
                 eps = 0 # avoid division by zero
-                self.targets[i] = (self.targets[i] - np.nanmin(self.targets[i])) / (np.nanmax(self.targets[i]) - np.nanmin(self.targets[i])) + eps
+                self.targets[:, i] = (self.targets[:, i] - np.nanmin(self.targets[:, i])) / (np.nanmax(self.targets[:, i]) - np.nanmin(self.targets[:, i])) + eps
 
         if threshold > 0:
             self.matrices = self.threshold_mat()
@@ -132,7 +133,7 @@ class MatData(Dataset):
     
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
-        target = torch.from_numpy(np.array([self.data_array.isel(index=idx)[target_name].values for target_name in self.target_names])).to(torch.float32)
+        target = self.targets[idx]
         intra_network_conn_vect = self.intra_network_conn[idx]
         inter_network_conn_vect = self.inter_network_conn[idx]
         
