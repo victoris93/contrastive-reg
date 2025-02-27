@@ -88,7 +88,7 @@ class MatData(Dataset):
         
         if standardize_target:
             for i, target_name in enumerate(self.target_names):
-                print(f"Standardizing target {target_name} (min: {self.targets[i].min()}, max: {self.targets[i].max()}) to [0, 1]")
+                print(f"Standardizing target {target_name} (min: {np.nanmin(self.targets[:, i])}, max: {np.nanmax(self.targets[:, i])}) to [0, 1]")
                 eps = 0 # avoid division by zero
                 self.targets[:, i] = (self.targets[:, i] - np.nanmin(self.targets[:, i])) / (np.nanmax(self.targets[:, i]) - np.nanmin(self.targets[:, i])) + eps
 
