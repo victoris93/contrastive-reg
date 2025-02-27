@@ -188,10 +188,10 @@ def compile_test_corrs(mats_exp1, mats_exp2): # give tuples (true, recon)
     corr_data = pd.concat([corr_data_1, corr_data_2])
     return corr_data
 
-def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, mape_mat, is_full_model = False, run_num = None):
+def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, mape_mat, is_full_model = False, fold = None):
     suffix =''
     if is_full_model:
-        suffix = f"_run{run_num}"
+        suffix = f"_fold{fold}"
 
     fig_path = f"{work_dir}/results/figures/test_recon_corr_{exp_name}{suffix}.png"
 
@@ -219,10 +219,10 @@ def wandb_plot_test_recon_corr(wandb, exp_name, work_dir, recon_mat, true_mat, m
     wandb.log({f"Corr(True, Recon) | All Test | {exp_name}": wandb.Image(fig_path)})
 
 
-def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, true_mat, mape_mat, sub_idx, is_full_model = False, run_num = None):
+def wandb_plot_individual_recon(wandb, exp_name, work_dir, test_idx, recon_mat, true_mat, mape_mat, sub_idx, is_full_model = False, fold = None):
     suffix =''
     if is_full_model:
-        suffix = f"_run{run_num}"
+        suffix = f"_fold{fold}"
 
     sub_idx_in_test = test_idx[sub_idx]
     recon = recon_mat[sub_idx]

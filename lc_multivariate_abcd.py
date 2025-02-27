@@ -19,6 +19,7 @@ import torch.optim as optim
 from scipy.stats import spearmanr
 from sklearn.model_selection import (
     train_test_split,
+    KFold
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
@@ -38,7 +39,11 @@ from ContModeling.utils import (
 from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
-from ContModeling.viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
+from ContModeling.viz_func import (
+    wandb_plot_acc_vs_baseline,
+    wandb_plot_test_recon_corr,
+    wandb_plot_individual_recon
+)
 
 torch.cuda.empty_cache()
 
@@ -65,7 +70,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         self.results = None
         self.embeddings = None
 
-    def __call__(self, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
+    def __call__(self, train, fold, train_idx, val_idx, test_idx, test_dataset, train_ratio, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -77,46 +82,31 @@ class ModelRun(submitit.helpers.Checkpointable):
             os.makedirs(recon_mat_dir, exist_ok=True)
     
             predictions = {}
-            autoencoder_features = {}
             losses = []
             self.embeddings = {'train': [], 'test': []}
-            self.run = run
+            self.fold = fold
 
             if cfg.mat_ae_pretrained:
-                print("Loading test indices from the pretraining experiment...")
-                test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
-                train_indices = np.setdiff1d(indices, test_indices)
-                if train_ratio < 1.0:
-                    train_size = int(len(train_indices) * train_ratio)
-                    train_indices = random_state.choice(train_indices, train_size, replace=False)
+                print("Loading val indices from a pretraining fold...")
+                train_idx = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/train_idx_fold{self.fold}_train_ratio{train_ratio}.npy")
+                val_idx = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
 
-            elif cfg.external_test_mode:
-                test_scanners = list(cfg.test_scanners)
-                xr_dataset = xr.open_dataset(cfg.dataset_path)
-                scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
-                                    axis = 0).astype(bool)
-                test_indices = indices[scanner_mask]
-                train_indices = indices[~scanner_mask]
-                if train_ratio < 1.0:
-                    train_size = int(len(train_indices) * train_ratio)
-                    train_indices = random_state.choice(train_indices, train_size, replace=False)
-                del xr_dataset
-
-            else:
-                run_indices = random_state.choice(indices, run_size, replace=False)
-                train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
+            # elif cfg.external_test_mode:
+            #     test_scanners = list(cfg.test_scanners)
+            #     xr_dataset = xr.open_dataset(cfg.dataset_path)
+            #     scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
+            #                         axis = 0).astype(bool)
+            #     val_indices = fold_indices[scanner_mask]
+            #     train_indices = fold_indices[~scanner_mask]
+            #     if train_ratio < 1.0:
+            #         train_size = int(len(train_indices) * train_ratio)
+            #         train_indices = random_state.choice(train_indices, train_size, replace=False)
+            #     del xr_dataset
                 
-            train_dataset = Subset(dataset, train_indices)
-            test_dataset = Subset(dataset, test_indices)
+            train_dataset = Subset(dataset, train_idx)
+            val_dataset = Subset(dataset, val_idx)
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
-            train_targets = train_dataset.dataset.targets[train_dataset.indices].numpy()
-            train_inter_network_conn = train_dataset.dataset.inter_network_conn[train_dataset.indices]
-            train_intra_network_conn = train_dataset.dataset.intra_network_conn[train_dataset.indices]
-
-            std_train_targets, mean, std = standardize(train_targets)
-            # scaler = MinMaxScaler().fit(train_targets)
-            # train_targets = scaler.transform(train_targets)
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
@@ -126,30 +116,19 @@ class ModelRun(submitit.helpers.Checkpointable):
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
 
-            test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
-            test_targets = test_dataset.dataset.targets[test_dataset.indices].numpy()
-            test_inter_network_conn = test_dataset.dataset.inter_network_conn[test_dataset.indices]
-            test_intra_network_conn = test_dataset.dataset.intra_network_conn[test_dataset.indices]
-
-            train_dataset = TensorDataset(train_features,
-                                          torch.from_numpy(train_targets).to(torch.float32),
-                                          train_inter_network_conn,
-                                          train_intra_network_conn)
+            loss_terms, model = train(self.fold,
+                                      train_ratio,
+                                      train_dataset,
+                                      val_dataset,
+                                      B_init_fMRI,
+                                      cfg,
+                                      device=device)
             
-            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32),
-                                         torch.from_numpy(test_targets).to(torch.float32),
-                                         test_inter_network_conn,
-                                         test_intra_network_conn)
-
-            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, device=device)
             losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
-
-            mean = torch.tensor(mean).to(device) #do we need this?
-            std  = torch.tensor(std).to(device)
 
             wandb.init(project=cfg.project,
                 mode = "offline",
-                name=f"TEST_{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
+                name=f"TEST_{cfg.experiment_name}_fold{self.fold}_train_ratio_{train_ratio}",
                 dir = cfg.output_dir,
                 config = OmegaConf.to_container(cfg, resolve=True))
             
@@ -158,7 +137,7 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             model.eval()
             with torch.no_grad():
-                for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
+                for label, d, d_indices in (('train', train_dataset, train_idx), ('validation', val_dataset, val_idx), ('test', test_dataset, test_idx)):
 
                     is_test = True
                     if label == 'train':
@@ -176,24 +155,23 @@ class ModelRun(submitit.helpers.Checkpointable):
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
                     X_emb_reduced, X_emb_reduced_norm = model.encode_reduced_mat(X_embedded)
                     
-                    if label == 'test' and train_ratio == 1.0:
-                        np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
+                    if label == 'test':
                         inv_feat_embedding = model.decode_reduced_mat(X_emb_reduced).detach().cpu().numpy()
                         inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
                         inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
                         recon_mat = model.decode_features(inv_feat_embedding)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         
-                        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), True, run)
-                        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0, True, run)
+                        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), True, fold)
+                        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0, True, fold)
 
-                        np.save(f'{recon_mat_dir}/recon_mat_run{run}', recon_mat.cpu().numpy())
-                        np.save(f'{recon_mat_dir}/mape_mat_run{run}', mape_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/recon_mat_fold{fold}_train_ratio{train_ratio}', recon_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/mape_mat_fold{fold}_train_ratio{train_ratio}', mape_mat.cpu().numpy())
 
                     y_pred = model.decode_targets(X_emb_reduced_norm)
 
-                    save_embeddings(X_embedded, "mat", cfg, is_test, run)
-                    save_embeddings(X_emb_reduced_norm, "joint", cfg, is_test, run)
+                    save_embeddings(X_embedded, "mat", cfg, is_test, train_ratio, fold)
+                    save_embeddings(X_emb_reduced_norm, "joint", cfg, is_test, train_ratio, fold)
 
                     if label == 'test':
                         epsilon = 1e-8
@@ -201,14 +179,14 @@ class ModelRun(submitit.helpers.Checkpointable):
                         corr =  spearmanr(y.cpu().numpy().flatten(), y_pred.cpu().numpy().flatten())[0]
 
                         wandb.log({
-                            'Run': run,
+                            'Fold': self.fold,
                             "Train ratio": train_ratio,
                             'Test | Target MAPE/val' : mape,
                             'Test | Target Corr/val': corr,
                             'Test | Train ratio' : train_ratio
                             })
             
-                    predictions[(train_ratio, run, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
+                    predictions[(train_ratio, fold, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
@@ -221,7 +199,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         if save_model:
             saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
             os.makedirs(saved_models_dir, exist_ok=True)
-            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_train_ratio{train_ratio}_run{run}.pth")
+            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
 
         return self.results
 
@@ -233,8 +211,8 @@ class ModelRun(submitit.helpers.Checkpointable):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
 
-def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
-    print("Start training...")
+def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model=None, device=device):
+    print(f"Start training...Fold {fold}")
 
     # MODEL DIMS
     input_dim_feat = cfg.input_dim_feat
@@ -252,10 +230,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     num_epochs = cfg.num_epochs
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
-    mean= torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
     if model is None:
         model = PhenoProj(
             input_dim_feat,
@@ -269,19 +245,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
     if cfg.full_model_pretrained:
         print(f"Loading pretrained FULL model, train ratio {train_ratio}...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_train_ratio{train_ratio}_run0.pth")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
         model.load_state_dict(state_dict)
-
-    else:
-        if cfg.mat_ae_pretrained:
-            print("Loading pretrained MatrixAutoencoder...")
-            state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
-            model.matrix_ae.load_state_dict(state_dict)
-
-        if cfg.reduced_mat_ae_pretrained:
-            print("Loading pretrained ReducedMatrixAutoencoder...")
-            state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_reduced_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_reduced_mat_ae_fold}.pth")
-            model.reduced_matrix_ae.load_state_dict(state_dict)
         
     if cfg.mat_ae_enc_freeze:
         print("Freezing weights for mat encoding...")
@@ -342,13 +307,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
     loss_terms = []
     validation = []
-    autoencoder_features = []
 
     gc.collect()
 
     wandb.init(project=cfg.project,
         mode = "offline",
-        name=f"{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
+        name=f"{cfg.experiment_name}_fold{fold}_train_ratio_{train_ratio}",
         dir = cfg.output_dir,
         config = OmegaConf.to_container(cfg, resolve=True))
     
@@ -428,7 +392,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                         if param.grad is not None:
                             wandb.log({
                                 "Epoch": epoch,
-                                'Run': run,
+                                'Fold': fold,
                                 "Train ratio": train_ratio,
                                 f"Gradient Norm/{name}": param.grad.norm().item()
                             })  
@@ -443,7 +407,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
 
                     wandb.log({
                         'Epoch': epoch,
-                        'Run': run,
+                        'Fold': fold,
                         "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
                         'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
@@ -453,7 +417,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['reduced_mat_recon_loss'] = reduced_mat_recon_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
-                        'Run': run,
+                        'Fold': fold,
                         "Train ratio": train_ratio,
                         'reduced_mat_recon_loss': loss_terms_batch['reduced_mat_recon_loss'],
                     })
@@ -462,7 +426,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['target_decoding_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
-                        'Run': run,
+                        'Fold': fold,
                         "Train ratio": train_ratio,
                         'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
                     })
@@ -473,14 +437,14 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
-                        'Run': run,
+                        'Fold': fold,
                         "Train ratio": train_ratio,
                         'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
                     })
                 
                 wandb.log({
                     'Epoch': epoch,
-                    'Run': run,
+                    'Fold': fold,
                     "Train ratio": train_ratio,
                     'total_loss': loss_terms_batch['loss'],
                 })
@@ -492,7 +456,7 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             mape_batch = 0
             corr_batch = 0
             with torch.no_grad():
-                for features, targets, _, _ in test_loader:
+                for features, targets, _, _ in val_loader:
 
                     features, targets, _, _ = filter_nans(features, targets)
                     
@@ -516,12 +480,12 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                     mape_batch += mape.item()
                     corr_batch += corr
 
-                mape_batch = mape_batch/len(test_loader)
-                corr_batch = corr_batch/len(test_loader)
+                mape_batch = mape_batch/len(val_loader)
+                corr_batch = corr_batch/len(val_loader)
                 validation.append(mape_batch)
 
             wandb.log({
-                'Run': run,
+                'Fold': fold,
                 "Train ratio": train_ratio,
                 'Target MAPE/val' : mape_batch,
                 'Target Corr/val': corr_batch,
@@ -563,10 +527,15 @@ def main(cfg: DictConfig):
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
-    n_runs = cfg.n_runs
     multi_gpu = cfg.multi_gpu
     train_ratios = cfg.train_ratio
     print("Train ratios: ", train_ratios)
+
+    train_val_idx, test_idx = train_test_split(indices, test_size=cfg.test_size, random_state=random_state)
+    train_val_dataset = Subset(dataset, train_val_idx)
+    test_dataset = Subset(dataset, test_idx)
+    np.save(f"{results_dir}/test_idx.npy", test_idx)
+    kf = KFold(n_splits=cfg.kfolds, shuffle=True, random_state=random_state)
 
     if multi_gpu:
         print("Using multi-gpu")
@@ -579,33 +548,62 @@ def main(cfg: DictConfig):
             tasks_per_node=1,
             nodes=1
         )
-        run_jobs = []
+        fold_jobs = []
 
         with executor.batch():
             for train_ratio in tqdm(train_ratios, desc="Training Size"):
                 train_size = int(n_sub * (1 - test_ratio) * train_ratio)
                 run_size = test_size + train_size
-                for run in tqdm(range(n_runs)):
+                train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
+                for fold, (train_idx, val_idx) in enumerate(tqdm(kf.split(train_val_idx), desc="Fold")):
+                    np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+                    np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
                     run_model = ModelRun()
-                    job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-                    run_jobs.append(job)
+                    job = executor.submit(run_model,
+                                          train,
+                                          fold,
+                                          train_idx,
+                                          val_idx,
+                                          train_val_dataset,
+                                          test_dataset,
+                                          train_ratio,
+                                          run_size,
+                                          dataset,
+                                          cfg,
+                                          random_state=random_state,
+                                          device=None)
+                    fold_jobs.append(job)
 
-        async def get_result(run_jobs):
+        async def get_result(fold_jobs):
             run_results = []
-            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in run_jobs]), total=len(run_jobs)):
+            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in fold_jobs]), total=len(fold_jobs)):
                 res = await aws
                 run_results.append(res)
             return run_results
-        run_results = asyncio.run(get_result(run_jobs))
+        run_results = asyncio.run(get_result(fold_jobs))
 
     else:
         run_results = []
         for train_ratio in tqdm(train_ratios, desc="Training Size"):
             train_size = int(n_sub * (1 - test_ratio) * train_ratio)
             run_size = test_size + train_size
-            for run in tqdm(range(n_runs), desc="Model Run"):
+            train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
+            for fold, (train_idx, val_idx) in enumerate(tqdm(kf.split(train_val_idx), desc="Fold")):
+                np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+                np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
                 run_model = ModelRun()
-                job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
+                job = run_model(train,
+                                fold,
+                                train_idx,
+                                val_idx,
+                                train_val_dataset,
+                                test_dataset,
+                                train_ratio,
+                                run_size,
+                                dataset,
+                                cfg,
+                                random_state=random_state,
+                                device=None)
                 run_results.append(job)
 
     losses, predictions, embeddings = zip(*run_results)
@@ -619,7 +617,7 @@ def main(cfg: DictConfig):
         true_targets, predicted_targets, indices = v
         
         true_targets_dict = {"train_ratio": [k[0]] * len(true_targets),
-                             "model_run":[k[1]] * len(true_targets),
+                             "fold":[k[1]] * len(true_targets),
                              "dataset":[k[2]] * len(true_targets)
                             }
         predicted_targets_dict = {"indices": indices}
@@ -646,7 +644,7 @@ def main(cfg: DictConfig):
             prediction_mape_by_element.append(
                 {
                     'train_ratio': k[0],
-                    'model_run': k[1],
+                    'fold': k[1],
                     'dataset': k[2],
                     'mape': mape
                 }
@@ -654,8 +652,8 @@ def main(cfg: DictConfig):
 
     df = pd.DataFrame(prediction_mape_by_element)
     df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-    df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
-    df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
+    df.columns = ['train_ratio', 'fold', 'dataset'] + targets
+    df= df.groupby(['train_ratio', 'fold', 'dataset']).agg('mean').reset_index()
     df.to_csv(f"{results_dir}/mape.csv", index = False)
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from pathlib import Path
 from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.stats import pearsonr, spearmanr
 
-def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
+def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, train_ratio = None, fold = None, epoch = None):
     embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
     os.makedirs(embedding_dir, exist_ok=True)
     embedding_numpy = embedding.cpu().detach().numpy()
@@ -23,6 +23,11 @@ def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = 
         batch_suffix = ''
     else:
         batch_suffix = f"_batch{batch}"
+
+    if train_ratio is None:
+        train_ratio_suffix = ''
+    else:
+        train_ratio_suffix = f"_train_ratio{train_ratio}"
 
     if fold is None:
         fold_suffix = ''
@@ -44,7 +49,7 @@ def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = 
     else:
         epoch_suffix = f"_epoch{epoch}"
 
-    save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{run_suffix}{dataset_suffix}.npy"
+    save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{train_ratio_suffix}{run_suffix}{dataset_suffix}.npy"
     np.save(save_path, embedding_numpy)
 
 def mean_correlations_between_subjects(y_true, y_pred):
