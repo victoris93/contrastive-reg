@@ -1,24 +1,29 @@
-project: "PretrainMatAE_ABCD"
-experiment_name: "synth_external_mat_ae_abcd"
+project: "MatAE"
+experiment_name: "pretrain_mat_ae_hcp"
+
+# hydra:
+#   run:
+#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
 
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 100
-batch_size: 64
+num_epochs: 200
+batch_size: 128
 kfolds: 5
 lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_size : 0.3
+test_ratio : 0.3
 seed : 42
 log_gradients: True
 clip_grad: True
-synth_exp: True
+synth_exp: False
+train_ratio: [1.0] # multiple values for a learning curve
 
 # test options
-external_test_mode: True
+external_test_mode: False
 test_scanners:
     - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
     - "Philips Medical Systems_Achieva dStream"
@@ -27,26 +32,34 @@ test_scanners:
 # enhancements
 ReEig: False
 skip_enc1: False
+skip_conn: True
 
 # Model dimensions
 input_dim_feat: 400
-output_dim_feat: 70
-input_type: "matrices" # Options: matrices, targets
+hidden_dim : 128
+output_dim_feat: 100
+output_dim_target: 64
+input_type: "matrices" # Options: matrices, reduced_mat
 
 # Loss function and optimizer
 loss_function: Norm  # Options: LogEuclidean, Norm, MSE
+supcon_base_temperature: 0.07
+supcon_temperature: 0.07
+supcon_sigma: 1
+supcon_reg_term: 0.01
+SupCon_kernel: cauchy
 
 # modify manually if test is run as a separate job
-best_fold: 1
+best_fold: 2
 
 # Paths for data
-dataset_path: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/ABCD/abcd_dataset_400parcels_1.nc"
+dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/hcp_kong_400parcels.nc"
 targets:
-    - pea_wiscv_trs
+    - CogTotalComp_AgeAdj # used is supervised
 
 # Directory for saving results
-work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
-embedding_dir : embeddings
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
 reconstructed_dir : recon_mat
+embedding_dir : embeddings
 model_weight_dir : saved_models
-output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"

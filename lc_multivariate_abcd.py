@@ -16,9 +16,11 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
 from scipy.stats import spearmanr
 from sklearn.model_selection import (
     train_test_split,
+    KFold
 )
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
@@ -28,11 +30,22 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 import random
 from sklearn.preprocessing import MinMaxScaler
 
-from ContModeling.utils import gaussian_kernel, cauchy, standardize, save_embeddings
-from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon
+from ContModeling.utils import (
+    gaussian_kernel,
+    cauchy,
+    rbf,
+    standardize,
+    save_embeddings,
+    filter_nans
+)
+from ContModeling.losses import LogEuclideanLoss, NormLoss, KernelizedSupCon, OutlierRobustMSE
 from ContModeling.models import PhenoProj
 from ContModeling.helper_classes import MatData
-from ContModeling.viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
+from ContModeling.viz_func import (
+    wandb_plot_acc_vs_baseline,
+    wandb_plot_test_recon_corr,
+    wandb_plot_individual_recon
+)
 
 torch.cuda.empty_cache()
 
@@ -42,6 +55,8 @@ EMB_LOSSES ={
     'Norm': NormLoss(),
     'LogEuclidean': LogEuclideanLoss(),
     'MSE': nn.functional.mse_loss,
+    'MAE': nn.functional.l1_loss,
+    'MSERobust': OutlierRobustMSE(),
     'Huber': nn.HuberLoss(),
     'cosine': nn.functional.cosine_embedding_loss,
 }
@@ -49,6 +64,7 @@ EMB_LOSSES ={
 SUPCON_KERNELS = {
     'cauchy': cauchy,
     'gaussian_kernel': gaussian_kernel,
+    'rbf': rbf,
     'None': None
     }
 
@@ -58,99 +74,74 @@ class ModelRun(submitit.helpers.Checkpointable):
         self.results = None
         self.embeddings = None
 
-    def __call__(self, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
+    def __call__(self, train, fold, train_idx, val_idx, test_idx, train_ratio, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 print(f"Device {device}, ratio {train_ratio}", flush=True)
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
-
-            augmentations = cfg.augmentation
-
+            
             recon_mat_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.reconstructed_dir)
             os.makedirs(recon_mat_dir, exist_ok=True)
     
             predictions = {}
-            autoencoder_features = {}
             losses = []
-            self.embeddings = {'train': [], 'test': []}
-            self.run = run
+            self.embeddings = {'train': [], 'validation': [], 'test': []}
+            self.fold = fold
 
-            if cfg.mat_ae_pretrained:
-                print("Loading test indices from the pretraining experiment...")
-                test_indices = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/test_idx.npy")
-                train_indices = np.setdiff1d(indices, test_indices)
-            elif cfg.external_test_mode:
-                test_scanners = list(cfg.test_scanners)
-                xr_dataset = xr.open_dataset(cfg.dataset_path)
-                scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
-                                    axis = 0).astype(bool)
-                test_indices = indices[scanner_mask]
-                train_indices = indices[~scanner_mask]
-                del xr_dataset
-            else:
-                run_indices = random_state.choice(indices, run_size, replace=False)
-                train_indices, test_indices = train_test_split(run_indices, test_size=test_size, random_state=random_state)
-                
-            train_dataset = Subset(dataset, train_indices)
-            test_dataset = Subset(dataset, test_indices)
+            if cfg.full_model_pretrained:
+                print(f"Loading val indices from a pretrain exp {cfg.full_model_pretrained_exp}, fold {fold}, train ratio {train_ratio}...")
+                train_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/train_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                val_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                test_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/test_idx.npy")
+            elif cfg.mat_ae_pretrained:
+                print(f"Loading val indices from a pretrain exp {cfg.mat_ae_pretrained_exp}, fold {fold}, train ratio {train_ratio}...")
+                train_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/train_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                val_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                test_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/test_idx.npy")
+
+            # elif cfg.external_test_mode:
+            #     test_scanners = list(cfg.test_scanners)
+            #     xr_dataset = xr.open_dataset(cfg.dataset_path)
+            #     scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
+            #                         axis = 0).astype(bool)
+            #     val_indices = fold_indices[scanner_mask]
+            #     train_indices = fold_indices[~scanner_mask]
+            #     if train_ratio < 1.0:
+            #         train_size = int(len(train_indices) * train_ratio)
+            #         train_indices = random_state.choice(train_indices, train_size, replace=False)
+            #     del xr_dataset
+
+            train_dataset = Subset(dataset, train_idx)
+            val_dataset = Subset(dataset, val_idx)
+            test_dataset = Subset(dataset, test_idx)
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
-            train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-            std_train_targets, mean, std= standardize(train_targets)
-            # scaler = MinMaxScaler().fit(train_targets)
-            # train_targets = scaler.transform(train_targets)
+            print(train_features.shape)
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
 
             ## Weight initialization for bilinear layer
             mean_f = torch.mean(train_features, dim=0).to(device)
-            [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
-            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:] 
-            test_features= test_dataset.dataset.matrices[test_dataset.indices].numpy()
-            test_targets = test_dataset.dataset.target[test_dataset.indices].numpy()
-            # test_targets = scaler.transform(test_targets)
-
-            ### Augmentation
-            if augmentations != 'None':
-#                 aug_params = {}
-                if not isinstance(augmentations, list):
-                    augmentations = [augmentations]
-                n_augs = len(augmentations)
-                vect_train_features = sym_matrix_to_vec(train_features, discard_diagonal=True)
-                n_samples = len(train_dataset)
-                n_features = vect_train_features.shape[-1]
-                new_train_features = np.zeros((n_samples + n_samples * n_augs, 1, n_features))
-                new_train_features[:n_samples, 0, :] = vect_train_features
-
-                for i, aug in enumerate(augmentations):
-                    transform = augs[aug]
-                    transform_args = aug_args[aug]
-#                     aug_params[aug] = transform_args # to save later in the metrics df
-
-                    num_aug = i + 1
-                    aug_features = np.array([transform(sample, **transform_args) for sample in train_features])
-                    aug_features = sym_matrix_to_vec(aug_features, discard_diagonal=True)
-
-                    new_train_features[n_samples * num_aug: n_samples * (num_aug + 1), 0, :] = aug_features
-
-                train_features = new_train_features
-                train_targets = np.concatenate([train_targets]*(n_augs + 1), axis=0)
             
-            train_dataset = TensorDataset(train_features, torch.from_numpy(train_targets).to(torch.float32))
-            test_dataset = TensorDataset(torch.from_numpy(test_features).to(torch.float32), torch.from_numpy(test_targets).to(torch.float32))
+            [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
+            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
 
-            loss_terms, model = train(run, train_ratio, train_dataset, test_dataset,mean, std, B_init_fMRI, cfg, device=device)
-            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
-
-            mean = torch.tensor(mean).to(device) #do we need this?
-            std  = torch.tensor(std).to(device)
+            loss_terms, model = train(self.fold,
+                                      train_ratio,
+                                      train_dataset,
+                                      val_dataset,
+                                      B_init_fMRI,
+                                      cfg,
+                                      device=device)
+            
+            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("fold = @fold"))
 
             wandb.init(project=cfg.project,
                 mode = "offline",
-                name=f"TEST_{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
+                name=f"TEST_{cfg.experiment_name}_fold{self.fold}_train_ratio_{train_ratio}",
                 dir = cfg.output_dir,
                 config = OmegaConf.to_container(cfg, resolve=True))
             
@@ -159,40 +150,41 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             model.eval()
             with torch.no_grad():
-                train_dataset = Subset(dataset, train_indices)
-                train_features = train_dataset.dataset.matrices[train_dataset.indices].numpy()
-                train_targets = train_dataset.dataset.target[train_dataset.indices].numpy()
-                train_dataset = TensorDataset(torch.from_numpy(train_features).to(torch.float32), torch.from_numpy(train_targets).to(torch.float32))
-                std_train_targets,_,_ = standardize(train_targets)
+                for label, d, d_indices in (('train', train_dataset, train_idx), ('validation', val_dataset, val_idx), ('test', test_dataset, test_idx)):
 
-                for label, d, d_indices in (('train', train_dataset, train_indices), ('test', test_dataset, test_indices)):
                     is_test = True
                     if label == 'train':
                         is_test = False
                     
-                    X, y = zip(*d)
-                    X = torch.stack(X).to(device)
-                    y = torch.stack(y).to(device)
-                    X_embedded, y_embedded = model.forward(X, y)
-                                        
-                    if label == 'test' and train_ratio == 1.0:
-                        np.save(f'{recon_mat_dir}/test_idx_run{run}',d_indices)
-                        recon_mat = model.decode_features(X_embedded)
+                    X, y, _, _ = zip(*d)
+                    X = torch.stack(X)
+                    y = torch.stack(y)
+                    X, y, d_indices, _ = filter_nans(X, y, d_indices)
+                    X = X.to(device)
+                    y = y.to(device)
+
+                    X_embedded = model.encode_features(X)
+                    X_embedded = X_embedded.cpu().numpy()
+                    X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
+                    X_emb_reduced, X_emb_reduced_norm = model.encode_reduced_mat(X_embedded)
+                    
+                    if label == 'test':
+                        inv_feat_embedding = model.decode_reduced_mat(X_emb_reduced).detach().cpu().numpy()
+                        inv_feat_embedding = vec_to_sym_matrix(inv_feat_embedding)
+                        inv_feat_embedding = torch.tensor(inv_feat_embedding).to(torch.float32).to(device)
+                        recon_mat = model.decode_features(inv_feat_embedding)
                         mape_mat = torch.abs((X - recon_mat) / (X + 1e-10)) * 100
                         
-                        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), True, run)
-                        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0, True, run)
+                        wandb_plot_test_recon_corr(wandb, cfg.experiment_name, cfg.work_dir, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), True, fold)
+                        wandb_plot_individual_recon(wandb, cfg.experiment_name, cfg.work_dir, d_indices, recon_mat.cpu().numpy(), X.cpu().numpy(), mape_mat.cpu().numpy(), 0, True, fold)
 
-                        np.save(f'{recon_mat_dir}/recon_mat_run{run}', recon_mat.cpu().numpy())
-                        np.save(f'{recon_mat_dir}/mape_mat_run{run}', mape_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/recon_mat_fold{fold}_train_ratio{train_ratio}', recon_mat.cpu().numpy())
+                        np.save(f'{recon_mat_dir}/mape_mat_fold{fold}_train_ratio{train_ratio}', mape_mat.cpu().numpy())
 
-                    X_embedded = X_embedded.cpu().numpy()
-                    X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded, discard_diagonal=True)).to(torch.float32).to(device)
-                    X_emb_reduced = model.transfer_embedding(X_embedded).to(device)
-                    y_pred = model.decode_targets(X_emb_reduced)
+                    y_pred = model.decode_targets(X_emb_reduced_norm)
 
-                    save_embeddings(X_embedded, "mat", cfg, is_test, run)
-                    save_embeddings(X_emb_reduced, "joint", cfg, is_test, run)
+                    save_embeddings(X_embedded, "mat", cfg, label, train_ratio, fold)
+                    save_embeddings(X_emb_reduced_norm, "joint", cfg, label, train_ratio, fold)
 
                     if label == 'test':
                         epsilon = 1e-8
@@ -200,18 +192,18 @@ class ModelRun(submitit.helpers.Checkpointable):
                         corr =  spearmanr(y.cpu().numpy().flatten(), y_pred.cpu().numpy().flatten())[0]
 
                         wandb.log({
-                            'Run': run,
+                            'Fold': self.fold,
+                            "Train ratio": train_ratio,
                             'Test | Target MAPE/val' : mape,
                             'Test | Target Corr/val': corr,
                             'Test | Train ratio' : train_ratio
                             })
             
-                    predictions[(train_ratio, run, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
+                    predictions[(train_ratio, fold, label)] = (y.cpu().numpy(), y_pred.cpu().numpy(), d_indices)
                     for i, idx in enumerate(d_indices):
                         self.embeddings[label].append({
                             'index': idx,
-                            'target_embedded': y_embedded[i].cpu().numpy(),
-                            'feature_embedded': X_emb_reduced[i].cpu().numpy()
+                            'joint_embedding': X_emb_reduced[i].cpu().numpy()
                         })
             wandb.finish()
             
@@ -220,16 +212,20 @@ class ModelRun(submitit.helpers.Checkpointable):
         if save_model:
             saved_models_dir = os.path.join(cfg.output_dir, cfg.experiment_name, cfg.model_weight_dir)
             os.makedirs(saved_models_dir, exist_ok=True)
-            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_run{run}.pth")
+            torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
 
         return self.results
+        
+    def checkpoint(self, *args, **kwargs):
+        print("Checkpointing", flush=True)
+        return super().checkpoint(*args, **kwargs)
 
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
-        
-def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI, cfg, model=None, device=device):
-    print("Start training...")
+
+def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model=None, device=device):
+    print(f"Start training...Fold {fold}")
 
     # MODEL DIMS
     input_dim_feat = cfg.input_dim_feat
@@ -247,10 +243,8 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
     num_epochs = cfg.num_epochs
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
-    mean= torch.tensor(mean).to(device)
-    std = torch.tensor(std).to(device)
     if model is None:
         model = PhenoProj(
             input_dim_feat,
@@ -262,92 +256,147 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             cfg
         ).to(device)
 
-    if cfg.mat_ae_pretrained:
-        print("Loading pretrained MatrixAutoencoder...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_mat_ae_fold}.pth")
+    if cfg.full_model_pretrained:
+        print(f"Loading pretrained FULL model, fold {fold}, train ratio {train_ratio}...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/saved_models/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
+        model.load_state_dict(state_dict)
+    elif cfg.mat_ae_pretrained:
+        print(f"Loading pretrained MatrixAutoencoder, fold {fold}, train ratio {train_ratio}...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/saved_models/autoencoder_weights_fold{fold}_train_ratio{train_ratio}.pth")
         model.matrix_ae.load_state_dict(state_dict)
     else:
         model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI)
+        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))   
+        
+    if cfg.mat_ae_enc_freeze:
+        print("Freezing weights for mat encoding...")
+        for param in model.matrix_ae.enc_mat1.parameters():
+            param.requires_grad = False
+        for param in model.matrix_ae.enc_mat2.parameters():
+            param.requires_grad = False
+
+    if cfg.mat_ae_dec_freeze:
+        print("Freezing weights for mat decoding...")
+        for param in model.matrix_ae.dec_mat1.parameters():
+            param.requires_grad = False
+        for param in model.matrix_ae.dec_mat2.parameters():
+            param.requires_grad = False
     
-    if cfg.target_ae_pretrained:
-        print("Loading pretrained TargetAutoencoder...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_target_ae_exp}/saved_models/autoencoder_weights_fold{cfg.best_target_ae_fold}.pth")
-        model.target_ae.load_state_dict(state_dict)
+    if cfg.reduced_mat_ae_enc_freeze:
+        print("Freezing weights for reduced mat encoding...")
+        for param in model.reduced_matrix_ae.reduced_mat_to_embed.parameters():
+            param.requires_grad = False
+
+    if cfg.reduced_mat_ae_dec_freeze:
+        print("Freezing weights for reduced mat decoding...")
+        for param in model.reduced_matrix_ae.embed_to_reduced_mat.parameters():
+            param.requires_grad = False
+    
+    if cfg.target_dec_freeze:
+        print("Freezing TargetDecoder...")
+        for param in model.target_dec.parameters():
+            param.requires_grad = False
 
     criterion_pft = KernelizedSupCon(
-        method="expw",
+        method="yaware",
         temperature=cfg.pft_temperature,
         base_temperature= cfg.pft_base_temperature,
-        reg_term = cfg.reg_term,
+        reg_term = cfg.pft_reg_term,
         kernel=kernel,
-        krnl_sigma_univar=cfg.pft_sigma_univar,
-        krnl_sigma_multivar=cfg.pft_sigma_multivar,
+        krnl_sigma=cfg.pft_sigma,
     )
-    
+
+    criterion_ptt = KernelizedSupCon(
+        method="yaware",
+        temperature=cfg.ptt_temperature,
+        base_temperature= cfg.ptt_base_temperature,
+        reg_term = cfg.ptt_reg_term,
+        kernel=kernel,
+        krnl_sigma=cfg.ptt_sigma,
+    )
     feature_autoencoder_crit = EMB_LOSSES[cfg.feature_autoencoder_crit]
     target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
-
+    optimizer = torch.optim.SGD(model.parameters(), lr=cfg.lr, weight_decay=weight_decay,
+                                momentum=0.9)
+    scheduler = StepLR(optimizer, step_size=40, gamma=0.1)
     loss_terms = []
     validation = []
-    autoencoder_features = []
 
     gc.collect()
-    
+
     wandb.init(project=cfg.project,
         mode = "offline",
-        name=f"{cfg.experiment_name}_run{run}_train_ratio_{train_ratio}",
+        name=f"{cfg.experiment_name}_fold{fold}_train_ratio_{train_ratio}",
         dir = cfg.output_dir,
         config = OmegaConf.to_container(cfg, resolve=True))
-
+    
     with tqdm(range(num_epochs), desc="Epochs", leave=False) as pbar:
         for epoch in pbar:
             model.train()
 
+            if cfg.reduced_mat_ae_pretrained:
+                model.reduced_matrix_ae.eval()
+            if cfg.reduced_mat_ae_enc_freeze:
+                model.reduced_matrix_ae.reduced_mat_to_embed.eval()
+            if cfg.reduced_mat_ae_dec_freeze:
+                model.reduced_matrix_ae.embed_to_reduced_mat.eval()
+            if cfg.target_dec_freeze:
+                model.target_dec.eval()
+                
             loss_terms_batch = defaultdict(lambda:0)
-            for features, targets in train_loader:
+            for features, targets, inter_network_conn, _ in train_loader:
+                loss = 0
                 
                 optimizer.zero_grad()
+
+                features, targets, _, inter_network_conn = filter_nans(features, targets, _z=inter_network_conn)
+
                 features = features.to(device)
                 targets = targets.to(device)
+                inter_network_conn = inter_network_conn.to(device)
 
-                ## FEATURE ENCODING
+                ## FEATURE ENCODING == MATRIX REDUCTION
                 embedded_feat = model.encode_features(features)
-                ## FEATURE DECODING
-                if not cfg.mat_ae_pretrained:
-                    reconstructed_feat = model.decode_features(embedded_feat)
-                    ## FEATURE DECODING LOSS
-                    feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 10_000
                 
-                ## REDUCED FEAT TO TARGET EMBEDDING
-                embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy(), discard_diagonal = True)
-                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(device)
-                reduced_feat_embedding = model.transfer_embedding(embedded_feat_vectorized)
+                ## VECTORIZE REDUCED MATRIX
+                embedded_feat_vectorized = sym_matrix_to_vec(embedded_feat.detach().cpu().numpy())
+                embedded_feat_vectorized = torch.tensor(embedded_feat_vectorized).to(torch.float32).to(device)
 
-                ## TARGET DECODING FROM MAT EMBEDDING
-                out_target_decoded = model.decode_targets(reduced_feat_embedding)
+                ## EMBEDDING OF THE REDUCED MATRIX
+                reduced_mat_embedding, reduced_mat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
+                out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
 
-                ## KERNLIZED LOSS: MAT embedding vs targets
-                kernel_embedded_feature_loss, direction_reg = criterion_pft(reduced_feat_embedding.unsqueeze(1), targets)
-                kernel_embedded_feature_loss = 100 * kernel_embedded_feature_loss
-                direction_reg = 100 * direction_reg
+                ## RECONSTRUCT REDUCED MATRIX FROM EMBEDDING AND THE FULL MATRIX FROM REDUCED
+                recon_reduced_mat = model.decode_reduced_mat(reduced_mat_embedding)
+
+                if not cfg.reduced_mat_ae_dec_freeze:
+                    reduced_mat_recon_loss = feature_autoencoder_crit(embedded_feat_vectorized, recon_reduced_mat) / 1000
+                    loss += reduced_mat_recon_loss
+
+                recon_reduced_mat = vec_to_sym_matrix(recon_reduced_mat.detach().cpu().numpy())
+                recon_reduced_mat = torch.tensor(recon_reduced_mat).to(torch.float32).to(device)
+
+                reconstructed_feat = model.decode_features(recon_reduced_mat)
 
                 ## LOSS: TARGET DECODING FROM TARGET EMBEDDING
                 if cfg.target_decoding_crit == 'Huber' and cfg.huber_delta != 'None':
                     target_decoding_crit = nn.HuberLoss(delta = cfg.huber_delta)
-                
-                target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded) / 100
 
+                if not cfg.reduced_mat_ae_enc_freeze:
+                    ## KERNLIZED LOSS: MAT embedding vs targets
+                    kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
+                    kernel_embedded_network_loss, _ = criterion_pft(reduced_mat_embedding_norm.unsqueeze(1), inter_network_conn)
+                    loss += (kernel_embedded_target_loss + kernel_embedded_network_loss)
 
-                ## SUM ALL LOSSES
-                loss = kernel_embedded_feature_loss + target_decoding_from_reduced_emb_loss
-                # print(kernel_embedded_feature_loss, kernel_embedded_feature_loss.type, target_decoding_from_reduced_emb_loss, target_decoding_from_reduced_emb_loss.type, direction_reg, direction_reg.type)
-
-                if not cfg.mat_ae_pretrained:
+                if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
+                    feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 1000
                     loss += feature_autoencoder_loss
+
+                if not cfg.target_dec_freeze:
+                    target_decoding_from_reduced_emb_loss = target_decoding_crit(targets, out_target_decoded)
+                    loss += target_decoding_from_reduced_emb_loss
 
                 loss.backward()
 
@@ -359,30 +408,61 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
                         if param.grad is not None:
                             wandb.log({
                                 "Epoch": epoch,
+                                'Fold': fold,
+                                "Train ratio": train_ratio,
                                 f"Gradient Norm/{name}": param.grad.norm().item()
-                                })  
+                            })  
 
                 optimizer.step()
 
                 loss_terms_batch['loss'] = loss.item() / len(features)
-                loss_terms_batch['kernel_embedded_feature_loss'] = kernel_embedded_feature_loss.item() / len(features)
-                loss_terms_batch['target_decoding_from_reduced_emb_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
-                loss_terms_batch['direction_reg_loss'] = direction_reg.item() / len(features)
+
+                if not cfg.reduced_mat_ae_enc_freeze:
+                    loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
+                    loss_terms_batch['kernel_embedded_network_loss'] = kernel_embedded_network_loss.item() / len(features)
+
+                    wandb.log({
+                        'Epoch': epoch,
+                        'Fold': fold,
+                        "Train ratio": train_ratio,
+                        'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
+                        'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
+                    })
+
+                if not cfg.reduced_mat_ae_dec_freeze:
+                    loss_terms_batch['reduced_mat_recon_loss'] = reduced_mat_recon_loss.item() / len(features)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'Fold': fold,
+                        "Train ratio": train_ratio,
+                        'reduced_mat_recon_loss': loss_terms_batch['reduced_mat_recon_loss'],
+                    })
                 
-                if not cfg.mat_ae_pretrained:
+                if not cfg.target_dec_freeze:
+                    loss_terms_batch['target_decoding_loss'] = target_decoding_from_reduced_emb_loss.item() / len(features)
+                    wandb.log({
+                        'Epoch': epoch,
+                        'Fold': fold,
+                        "Train ratio": train_ratio,
+                        'target_decoding_loss': loss_terms_batch['target_decoding_loss'],
+                    })
+
+                # loss_terms_batch['direction_reg_target_loss'] = direction_reg_target.item() / len(features)
+                
+                if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
                     loss_terms_batch['feature_autoencoder_loss'] = feature_autoencoder_loss.item() / len(features)
                     wandb.log({
                         'Epoch': epoch,
-                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss']
+                        'Fold': fold,
+                        "Train ratio": train_ratio,
+                        'feature_autoencoder_loss': loss_terms_batch['feature_autoencoder_loss'],
                     })
                 
                 wandb.log({
                     'Epoch': epoch,
-                    'Run': run,
+                    'Fold': fold,
+                    "Train ratio": train_ratio,
                     'total_loss': loss_terms_batch['loss'],
-                    'kernel_embedded_feature_loss': loss_terms_batch['kernel_embedded_feature_loss'],
-                    'direction_reg_loss': loss_terms_batch['direction_reg_loss'],
-                    'target_decoding_from_reduced_emb_loss': loss_terms_batch['target_decoding_from_reduced_emb_loss']
                 })
 
             loss_terms_batch['epoch'] = epoch
@@ -392,31 +472,43 @@ def train(run, train_ratio, train_dataset, test_dataset, mean, std, B_init_fMRI,
             mape_batch = 0
             corr_batch = 0
             with torch.no_grad():
-                for (features, targets) in test_loader:
+                for features, targets, _, _ in val_loader:
+
+                    features, targets, _, _ = filter_nans(features, targets)
                     
                     features, targets = features.to(device), targets.to(device)                    
-                    out_feat = model.encode_features(features)
-                    out_feat = torch.tensor(sym_matrix_to_vec(out_feat.detach().cpu().numpy(), discard_diagonal = True)).float().to(device)
-                    transfer_out_feat = model.transfer_embedding(out_feat)
-                    out_target_decoded = model.decode_targets(transfer_out_feat)
+                    reduced_mat = model.encode_features(features)
+                    
+                    reduced_mat = torch.tensor(sym_matrix_to_vec(reduced_mat.detach().cpu().numpy())).to(torch.float32).to(device)
+                    embedding, embedding_norm = model.encode_reduced_mat(reduced_mat)
+                    out_target_decoded = model.decode_targets(embedding_norm)
                     
                     epsilon = 1e-8
+
                     mape =  torch.mean(torch.abs((targets - out_target_decoded)) / torch.abs((targets + epsilon))) * 100
+                    if torch.isnan(mape):
+                        mape = torch.tensor(0.0)
+                    
                     corr =  spearmanr(targets.cpu().numpy().flatten(), out_target_decoded.cpu().numpy().flatten())[0]
-                    mape_batch+=mape.item()
+                    if np.isnan(corr):
+                        corr = 0.0
+                        
+                    mape_batch += mape.item()
                     corr_batch += corr
 
-                mape_batch = mape_batch/len(test_loader)
-                corr_batch = corr_batch/len(test_loader)
+                mape_batch = mape_batch/len(val_loader)
+                corr_batch = corr_batch/len(val_loader)
                 validation.append(mape_batch)
 
             wandb.log({
+                'Fold': fold,
+                "Train ratio": train_ratio,
                 'Target MAPE/val' : mape_batch,
                 'Target Corr/val': corr_batch,
                 })
             
-            scheduler.step(mape_batch)
-            if np.log10(scheduler._last_lr[0]) < -4:
+            scheduler.step()
+            if np.log10(scheduler._last_lr[0]) < -7:
                 break
 
             pbar.set_postfix_str(
@@ -436,19 +528,32 @@ def main(cfg: DictConfig):
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
 
-    random_state = np.random.RandomState(seed=42)
+    random_state = np.random.RandomState(seed=cfg.seed)
 
     dataset_path = cfg.dataset_path
-    targets = list(cfg.targets)
+
+    if isinstance(cfg.targets, str):
+        targets =[cfg.targets]
+    else:
+        targets = list(cfg.targets)
+        
     test_ratio = cfg.test_ratio
 
-    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
+    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, standardize_target=cfg.standardize_target, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
-    n_runs = cfg.n_runs
     multi_gpu = cfg.multi_gpu
-    train_ratio = cfg.train_ratio
+    train_ratios = list(cfg.train_ratio)
+
+    train_val_idx, test_idx = train_test_split(indices, test_size=test_ratio, random_state=random_state)
+    train_val_subs = len(train_val_idx)
+    # remove the sub 249 with nans in the matrix
+    test_idx = test_idx[test_idx!=249]
+    train_val_idx = train_val_idx[train_val_idx!=249]
+    
+    np.save(f"{results_dir}/test_idx.npy", test_idx)
+    kf = KFold(n_splits=cfg.kfolds, shuffle=True, random_state=random_state)
 
     if multi_gpu:
         print("Using multi-gpu")
@@ -460,34 +565,72 @@ def main(cfg: DictConfig):
             gpus_per_node=1,
             tasks_per_node=1,
             nodes=1
-            #slurm_constraint="v100-32g",
         )
-        run_jobs = []
+        fold_jobs = []
 
         with executor.batch():
-            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-            run_size = test_size + train_size
-            for run in tqdm(range(n_runs)):
-                run_model = ModelRun()
-                job = executor.submit(run_model, train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-                run_jobs.append(job)
+            for train_ratio in tqdm(train_ratios, desc="Training Size"):
+                train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
+                val_size = int(test_ratio * train_val_subs)
+                run_size = val_size + train_size
+                train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
+                
+                
+                for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)): # kf.split gives indices OF INDICES
+                    
+                    train_idx = train_val_idx[train_idx_idx]
+                    val_idx = train_val_idx[val_idx_idx]
+                    
+                    np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+                    np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
+                    run_model = ModelRun()
+                    job = executor.submit(run_model,
+                                          train,
+                                          fold,
+                                          train_idx,
+                                          val_idx,
+                                          test_idx,
+                                          train_ratio,
+                                          dataset,
+                                          cfg,
+                                          random_state=random_state,
+                                          device=None)
+                    fold_jobs.append(job)
 
-        async def get_result(run_jobs):
+        async def get_result(fold_jobs):
             run_results = []
-            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in run_jobs]), total=len(run_jobs)):
+            for aws in tqdm(asyncio.as_completed([j.awaitable().result() for j in fold_jobs]), total=len(fold_jobs)):
                 res = await aws
                 run_results.append(res)
             return run_results
-        run_results = asyncio.run(get_result(run_jobs))
+        run_results = asyncio.run(get_result(fold_jobs))
 
     else:
         run_results = []
-        train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-        run_size = test_size + train_size
-        for run in tqdm(range(n_runs), desc="Model Run"):
-            run_model = ModelRun()
-            job = run_model(train, test_size, indices, train_ratio, run_size, run, dataset, cfg, random_state=random_state, device=None)
-            run_results.append(job)
+        for train_ratio in tqdm(train_ratios, desc="Training Size"):
+            train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
+            val_size = int(test_ratio * train_val_subs)
+            run_size = val_size + train_size
+            train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
+            for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)): # kf.split gives indices OF INDICES
+                
+                train_idx = train_val_idx[train_idx_idx]
+                val_idx = train_val_idx[val_idx_idx]
+                
+                np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+                np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
+                run_model = ModelRun()
+                job = run_model(train,
+                                fold,
+                                train_idx,
+                                val_idx,
+                                test_idx,
+                                train_ratio,
+                                dataset,
+                                cfg,
+                                random_state=random_state,
+                                device=None)
+                run_results.append(job)
 
     losses, predictions, embeddings = zip(*run_results)
 
@@ -500,7 +643,7 @@ def main(cfg: DictConfig):
         true_targets, predicted_targets, indices = v
         
         true_targets_dict = {"train_ratio": [k[0]] * len(true_targets),
-                             "model_run":[k[1]] * len(true_targets),
+                             "fold":[k[1]] * len(true_targets),
                              "dataset":[k[2]] * len(true_targets)
                             }
         predicted_targets_dict = {"indices": indices}
@@ -527,7 +670,7 @@ def main(cfg: DictConfig):
             prediction_mape_by_element.append(
                 {
                     'train_ratio': k[0],
-                    'model_run': k[1],
+                    'fold': k[1],
                     'dataset': k[2],
                     'mape': mape
                 }
@@ -535,8 +678,8 @@ def main(cfg: DictConfig):
 
     df = pd.DataFrame(prediction_mape_by_element)
     df = pd.concat([df.drop('mape', axis=1), df['mape'].apply(pd.Series)], axis=1)
-    df.columns = ['train_ratio', 'model_run', 'dataset'] + targets
-    df= df.groupby(['train_ratio', 'model_run', 'dataset']).agg('mean').reset_index()
+    df.columns = ['train_ratio', 'fold', 'dataset'] + targets
+    df= df.groupby(['train_ratio', 'fold', 'dataset']).agg('mean').reset_index()
     df.to_csv(f"{results_dir}/mape.csv", index = False)
 
 if __name__ == "__main__":

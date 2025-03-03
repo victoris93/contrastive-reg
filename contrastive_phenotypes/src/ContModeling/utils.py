@@ -10,19 +10,24 @@ import os
 from sklearn.decomposition import PCA
 import torch.nn.functional as F
 from pathlib import Path
+from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.stats import pearsonr, spearmanr
 
-
-def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, fold = None, epoch = None):
+def save_embeddings(embedding, emb_type, cfg, dataset_label, run = None, batch = None, train_ratio = None, fold = None, epoch = None):
     embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
     os.makedirs(embedding_dir, exist_ok=True)
     embedding_numpy = embedding.cpu().detach().numpy()
-    emb_type = emb_type + '_' # either "mat", "target" or "joint"
+    emb_type = emb_type + '_'
 
     if batch is None:
         batch_suffix = ''
     else:
         batch_suffix = f"_batch{batch}"
+
+    if train_ratio is None:
+        train_ratio_suffix = ''
+    else:
+        train_ratio_suffix = f"_train_ratio{train_ratio}"
 
     if fold is None:
         fold_suffix = ''
@@ -34,44 +39,76 @@ def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = 
     else:
         run_suffix = f"_run{run}"
 
-    if test:
-        dataset_suffix = "_test"
-    else:
-        dataset_suffix = "_train"
-
     if epoch is None:
         epoch_suffix = ''
     else:
         epoch_suffix = f"_epoch{epoch}"
 
-    save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{run_suffix}{dataset_suffix}.npy"
+    dataset_suffix = f"_{dataset_label}"
+
+    save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{train_ratio_suffix}{run_suffix}{dataset_suffix}.npy"
     np.save(save_path, embedding_numpy)
 
 def mean_correlations_between_subjects(y_true, y_pred):
-    correlations = []
+
     y_true = y_true.cpu().detach().numpy()
     y_pred = y_pred.cpu().detach().numpy()
     
     num_subjects = y_true.shape[0]
-    matrix_size = y_true.shape[1]
+
+    lower_true = []
+    lower_pred = []
+
+    if len(y_true.shape) < 3:
+        correlations, _ = spearmanr(y_true.flatten(), y_pred.flatten())
+    else:
+        for subj in range(num_subjects):
+            L_pred = sym_matrix_to_vec(y_pred[subj], discard_diagonal=True)
+            L_true = sym_matrix_to_vec(y_true[subj], discard_diagonal=True)
+            lower_true.extend(L_true.tolist())
+            lower_pred.extend(L_pred.tolist())
+        correlations, _ = spearmanr(lower_true, lower_pred)
     
-    # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
-    upper_true = []
-    upper_pred = []
-    
-    for subj in range(num_subjects):
-        for i in range(matrix_size):
-            for j in range(i + 1, matrix_size):
-                upper_true.append(y_true[subj, i, j])
-                upper_pred.append(y_pred[subj, i, j])
-    
-    # Calculate Spearman correlation
-    spearman_corr, _ = spearmanr(upper_true, upper_pred)
-    correlations.append(spearman_corr)
     correlation = np.mean(correlations)
     
     return correlation
 
+def filter_nans_X(_X, indices = None):
+    nan_idx_X = torch.isnan(_X).any(dim=(1,2))
+    _X = _X[~nan_idx_X]
+    if indices is not None:
+        indices = indices[~nan_idx_X]
+        
+    return _X, indices
+
+def filter_nans_y(_y, indices = None):
+    nan_idx_y = torch.isnan(_y).squeeze()
+    _y = _y[~nan_idx_y]
+    if indices is not None:
+        indices = indices[~nan_idx_y]
+
+    return _y, indices
+
+def filter_nans(_X, _y, indices = None, _z = None):
+    if len(_y.shape) > 1:
+        nan_idx_y = torch.isnan(_y).any(dim=1)
+    else:
+        nan_idx_y = torch.isnan(_y).squeeze()
+        
+    nan_idx_X = torch.isnan(_X).any(dim=(1,2))
+    nan_idx = nan_idx_X | nan_idx_y
+
+    _X = _X[~nan_idx]
+    _y = _y[~nan_idx]
+
+    if _z is not None:
+        _z = _z[~nan_idx]
+
+    if indices is not None:
+        indices = indices[~nan_idx]
+
+    return _X, _y, indices, _z
+    
 def mean_correlation(y_true, y_pred):
     correlations = []
     y_true = y_true.cpu().detach().numpy()
@@ -90,31 +127,30 @@ def get_best_fold(train_fold_results):
 
 def mape_between_subjects(y_true, y_pred):
     eps = 1e-6
-    mapes = []
     y_true = y_true.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
     y_pred = y_pred.cpu().detach().numpy()  # Convert to NumPy array if using PyTorch tensor
 
     num_subjects = y_true.shape[0]
-    matrix_size = y_true.shape[1]
 
     # Flatten upper triangle (excluding diagonal) for both y_true and y_pred
-    upper_true = []
-    upper_pred = []
+    lower_true = []
+    lower_pred = []
 
-    for subj in range(num_subjects):
-        for i in range(matrix_size):
-            for j in range(i + 1, matrix_size):
-                true_val = y_true[subj, i, j]
-                pred_val = y_pred[subj, i, j]
-
-                # Add epsilon to denominator to avoid division by zero
-                mape = np.abs((true_val - pred_val) / (true_val + eps)) * 100.0
-                upper_true.append(true_val)
-                upper_pred.append(pred_val)
-                mapes.append(mape)
-
-    # Calculate mean MAPE
-    mean_mape = np.mean(mapes)
+    if len(y_true.shape) < 3:
+        mean_mape = (np.abs((y_true.flatten() - y_pred.flatten()) / (y_true.flatten() + eps)) * 100.0).mean()
+        print(y_true.flatten().shape)
+        
+    else:
+        for subj in range(num_subjects):
+            L_pred = sym_matrix_to_vec(y_pred[subj], discard_diagonal=True)
+            L_true = sym_matrix_to_vec(y_true[subj], discard_diagonal=True)
+            lower_true.extend(L_true.tolist())
+            lower_pred.extend(L_pred.tolist())
+        lower_true = np.array(lower_true)
+        print(lower_true.shape)
+        lower_pred = np.array(lower_pred)
+        mean_mape = (np.abs((lower_true - lower_pred) / (lower_true + eps)) * 100.0).mean()
+        
 
     return mean_mape
 
@@ -148,6 +184,12 @@ def standardize_dataset(dataset):
     standardized_dataset = TensorDataset(standardized_features, standardized_targets)
     
     return standardized_dataset
+
+def rbf(x, krnl_sigma):
+    if len(x.shape) == 1:
+        x = x.view(-1, 1)
+    x = torch.cdist(x, x, p=2)
+    return torch.exp(-(x ** 2) / (2 * (krnl_sigma ** 2)))
 
 def gaussian_kernel(x, krnl_sigma):
     if x.shape[-1] > 1:

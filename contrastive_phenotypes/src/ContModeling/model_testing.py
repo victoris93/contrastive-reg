@@ -23,7 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 
 from .viz_func import wandb_plot_acc_vs_baseline, wandb_plot_test_recon_corr, wandb_plot_individual_recon
-from .utils import mean_correlations_between_subjects, mape_between_subjects
+from .utils import mean_correlations_between_subjects, mape_between_subjects, filter_nans
 from .losses import LogEuclideanLoss, NormLoss
 from .models import AutoEncoder
 from .helper_classes import MatData
@@ -75,6 +75,8 @@ def test_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_d
     writer = SummaryWriter(log_dir=cfg.tensorboard_dir)
     with torch.no_grad():
         for i, (features, targets) in enumerate(test_loader):
+            
+            features, targets = filter_nans(features, targets)
 
             features = features.to(device)
 
