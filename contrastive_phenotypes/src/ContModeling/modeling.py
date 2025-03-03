@@ -320,7 +320,7 @@ def train_reduced_mat_autoencoder(fold, train_dataset, val_dataset, cfg, device,
     
     return loss_terms, model.state_dict(), val_loss.item()    
     
-def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
+def test_mat_autoencoder(best_fold, train_ratio, test_dataset, cfg, model_params_dir, recon_mat_dir, device):
     
     wandb.init(project=cfg.project,
         mode = "offline",
@@ -340,7 +340,7 @@ def test_mat_autoencoder(best_fold, test_dataset, cfg, model_params_dir, recon_m
             cfg
             ).to(device)
     
-    model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}.pth")) # Load the best fold weights
+    model.load_state_dict(torch.load(f"{model_params_dir}/autoencoder_weights_fold{best_fold}_train_ratio{train_ratio}.pth")) # Load the best fold weights
     
     model.eval()
     test_loss = 0

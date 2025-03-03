@@ -15,11 +15,12 @@ lr: 0.001
 weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
-test_size : 0.3
+test_ratio : 0.3
 seed : 42
 log_gradients: True
 clip_grad: True
 synth_exp: False
+train_ratio: [1.0] # multiple values for a learning curve
 
 # test options
 external_test_mode: False

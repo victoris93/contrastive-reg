@@ -13,7 +13,7 @@ from pathlib import Path
 from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 from scipy.stats import pearsonr, spearmanr
 
-def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = None, train_ratio = None, fold = None, epoch = None):
+def save_embeddings(embedding, emb_type, cfg, dataset_label, run = None, batch = None, train_ratio = None, fold = None, epoch = None):
     embedding_dir = f"{cfg.output_dir}/{cfg.experiment_name}/{cfg.embedding_dir}"
     os.makedirs(embedding_dir, exist_ok=True)
     embedding_numpy = embedding.cpu().detach().numpy()
@@ -39,15 +39,12 @@ def save_embeddings(embedding, emb_type, cfg, test = False, run = None, batch = 
     else:
         run_suffix = f"_run{run}"
 
-    if test:
-        dataset_suffix = "_test"
-    else:
-        dataset_suffix = "_train"
-
     if epoch is None:
         epoch_suffix = ''
     else:
         epoch_suffix = f"_epoch{epoch}"
+
+    dataset_suffix = f"_{dataset_label}"
 
     save_path = f"{embedding_dir}/{emb_type}embeddings{epoch_suffix}{batch_suffix}{fold_suffix}{train_ratio_suffix}{run_suffix}{dataset_suffix}.npy"
     np.save(save_path, embedding_numpy)

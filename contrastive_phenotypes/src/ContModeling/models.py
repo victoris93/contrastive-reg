@@ -119,6 +119,11 @@ class MatAutoEncoder(nn.Module):
         
         recon_mat = self.dec_mat2(z_n)
         return recon_mat
+
+    def forward(self, x):
+        c_hidd_fMRI = self.encode(x)
+        recon_mat = self.decode(c_hidd_fMRI)
+        return recon_mat
         
 class ReducedMatAutoEncoder(nn.Module):
     def __init__(

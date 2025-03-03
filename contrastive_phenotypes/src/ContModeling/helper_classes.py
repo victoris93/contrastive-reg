@@ -22,7 +22,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, fold, train_func, train_idx, val_idx, train_dataset, model_params_dir, cfg, random_state=None, device=None, path = None):
+    def __call__(self, fold, train_func, train_idx, val_idx, train_ratio, dataset, model_params_dir, cfg, random_state=None, device=None, path = None):
 
         if self.results is None:
             if device is None:
@@ -30,18 +30,17 @@ class FoldTrain(submitit.helpers.Checkpointable):
             if not isinstance(random_state, np.random.RandomState):
                 random_state = np.random.RandomState(random_state)
         
-        self.fold = fold + 1
+        self.fold = fold
         
         print(f"Fold {self.fold}")
-        fold_train_dataset = Subset(train_dataset, train_idx)
-        fold_val_dataset = Subset(train_dataset, val_idx)
+        fold_train_dataset = Subset(dataset, train_idx)
+        fold_val_dataset = Subset(dataset, val_idx)
 
-        self.fold = fold + 1
         if cfg.input_type == "matrices":
             input_dim_feat=cfg.input_dim_feat
             output_dim_feat=cfg.output_dim_feat
             
-            train_features = torch.stack([fold_train_dataset[i][0] for i in range(len(fold_train_dataset))])
+            train_features = fold_train_dataset.dataset.matrices[fold_train_dataset.indices]
             mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
@@ -50,7 +49,7 @@ class FoldTrain(submitit.helpers.Checkpointable):
         else:
             loss_terms, trained_weights, val_loss = train_func(self.fold, fold_train_dataset, fold_val_dataset, cfg, device)
 
-        torch.save(trained_weights, f"{model_params_dir}/autoencoder_weights_fold{self.fold}.pth")
+        torch.save(trained_weights, f"{model_params_dir}/autoencoder_weights_fold{self.fold}_train_ratio{train_ratio}.pth")
         
         self.results = {"fold": self.fold,
                         "val_loss": val_loss,

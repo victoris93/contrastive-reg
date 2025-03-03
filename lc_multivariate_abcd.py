@@ -32,6 +32,7 @@ from sklearn.preprocessing import MinMaxScaler
 from ContModeling.utils import (
     gaussian_kernel,
     cauchy,
+    rbf,
     standardize,
     save_embeddings,
     filter_nans
@@ -53,6 +54,7 @@ EMB_LOSSES ={
     'Norm': NormLoss(),
     'LogEuclidean': LogEuclideanLoss(),
     'MSE': nn.functional.mse_loss,
+    'MAE': nn.functional.l1_loss,
     'MSERobust': OutlierRobustMSE(),
     'Huber': nn.HuberLoss(),
     'cosine': nn.functional.cosine_embedding_loss,
@@ -61,6 +63,7 @@ EMB_LOSSES ={
 SUPCON_KERNELS = {
     'cauchy': cauchy,
     'gaussian_kernel': gaussian_kernel,
+    'rbf': rbf,
     'None': None
     }
 
@@ -70,7 +73,7 @@ class ModelRun(submitit.helpers.Checkpointable):
         self.results = None
         self.embeddings = None
 
-    def __call__(self, train, fold, train_idx, val_idx, test_idx, test_dataset, train_ratio, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
+    def __call__(self, train, fold, train_idx, val_idx, test_idx, train_ratio, dataset, cfg, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,13 +86,19 @@ class ModelRun(submitit.helpers.Checkpointable):
     
             predictions = {}
             losses = []
-            self.embeddings = {'train': [], 'test': []}
+            self.embeddings = {'train': [], 'validation': [], 'test': []}
             self.fold = fold
 
-            if cfg.mat_ae_pretrained:
-                print("Loading val indices from a pretraining fold...")
-                train_idx = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/train_idx_fold{self.fold}_train_ratio{train_ratio}.npy")
-                val_idx = np.load(f"{cfg.output_dir}/{cfg.pretrained_mat_ae_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
+            if cfg.full_model_pretrained:
+                print(f"Loading val indices from a pretrain exp {cfg.full_model_pretrained_exp}, fold {fold}, train ratio {train_ratio}...")
+                train_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/train_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                val_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                test_idx = np.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/test_idx.npy")
+            elif cfg.mat_ae_pretrained:
+                print(f"Loading val indices from a pretrain exp {cfg.mat_ae_pretrained_exp}, fold {fold}, train ratio {train_ratio}...")
+                train_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/train_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                val_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/val_idx_fold{fold}_train_ratio{train_ratio}.npy")
+                test_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/test_idx.npy")
 
             # elif cfg.external_test_mode:
             #     test_scanners = list(cfg.test_scanners)
@@ -102,17 +111,20 @@ class ModelRun(submitit.helpers.Checkpointable):
             #         train_size = int(len(train_indices) * train_ratio)
             #         train_indices = random_state.choice(train_indices, train_size, replace=False)
             #     del xr_dataset
-                
+
             train_dataset = Subset(dataset, train_idx)
             val_dataset = Subset(dataset, val_idx)
+            test_dataset = Subset(dataset, test_idx)
 
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
+            print(train_features.shape)
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
 
             ## Weight initialization for bilinear layer
             mean_f = torch.mean(train_features, dim=0).to(device)
+            
             [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")
             B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
 
@@ -124,7 +136,7 @@ class ModelRun(submitit.helpers.Checkpointable):
                                       cfg,
                                       device=device)
             
-            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("run = @run"))
+            losses.append(loss_terms.eval("train_ratio = @train_ratio").eval("fold = @fold"))
 
             wandb.init(project=cfg.project,
                 mode = "offline",
@@ -170,8 +182,8 @@ class ModelRun(submitit.helpers.Checkpointable):
 
                     y_pred = model.decode_targets(X_emb_reduced_norm)
 
-                    save_embeddings(X_embedded, "mat", cfg, is_test, train_ratio, fold)
-                    save_embeddings(X_emb_reduced_norm, "joint", cfg, is_test, train_ratio, fold)
+                    save_embeddings(X_embedded, "mat", cfg, label, train_ratio, fold)
+                    save_embeddings(X_emb_reduced_norm, "joint", cfg, label, train_ratio, fold)
 
                     if label == 'test':
                         epsilon = 1e-8
@@ -202,7 +214,7 @@ class ModelRun(submitit.helpers.Checkpointable):
             torch.save(model.state_dict(), f"{saved_models_dir}/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
 
         return self.results
-
+        
     def checkpoint(self, *args, **kwargs):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
@@ -244,9 +256,16 @@ def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model
         ).to(device)
 
     if cfg.full_model_pretrained:
-        print(f"Loading pretrained FULL model, train ratio {train_ratio}...")
-        state_dict = torch.load(f"{cfg.output_dir}/{cfg.pretrained_full_model_exp}/saved_models/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
+        print(f"Loading pretrained FULL model, fold {fold}, train ratio {train_ratio}...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.full_model_pretrained_exp}/saved_models/model_weights_fold{fold}_train_ratio{train_ratio}.pth")
         model.load_state_dict(state_dict)
+    elif cfg.mat_ae_pretrained:
+        print(f"Loading pretrained MatrixAutoencoder, fold {fold}, train ratio {train_ratio}...")
+        state_dict = torch.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/saved_models/autoencoder_weights_fold{fold}_train_ratio{train_ratio}.pth")
+        model.matrix_ae.load_state_dict(state_dict)
+    else:
+        model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
+        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))   
         
     if cfg.mat_ae_enc_freeze:
         print("Freezing weights for mat encoding...")
@@ -254,9 +273,6 @@ def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model
             param.requires_grad = False
         for param in model.matrix_ae.enc_mat2.parameters():
             param.requires_grad = False
-    else:
-        model.matrix_ae.enc_mat1.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
-        model.matrix_ae.enc_mat2.weight = torch.nn.Parameter(B_init_fMRI.transpose(0,1))
 
     if cfg.mat_ae_dec_freeze:
         print("Freezing weights for mat decoding...")
@@ -523,17 +539,19 @@ def main(cfg: DictConfig):
         
     test_ratio = cfg.test_ratio
 
-    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, reduced_mat = False, threshold=cfg.mat_threshold)
+    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, standardize_target=cfg.standardize_target, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     test_size = int(test_ratio * n_sub)
     indices = np.arange(n_sub)
     multi_gpu = cfg.multi_gpu
-    train_ratios = cfg.train_ratio
-    print("Train ratios: ", train_ratios)
+    train_ratios = list(cfg.train_ratio)
 
-    train_val_idx, test_idx = train_test_split(indices, test_size=cfg.test_size, random_state=random_state)
-    train_val_dataset = Subset(dataset, train_val_idx)
-    test_dataset = Subset(dataset, test_idx)
+    train_val_idx, test_idx = train_test_split(indices, test_size=test_ratio, random_state=random_state)
+    train_val_subs = len(train_val_idx)
+    # remove the sub 249 with nans in the matrix
+    test_idx = test_idx[test_idx!=249]
+    train_val_idx = train_val_idx[train_val_idx!=249]
+    
     np.save(f"{results_dir}/test_idx.npy", test_idx)
     kf = KFold(n_splits=cfg.kfolds, shuffle=True, random_state=random_state)
 
@@ -552,10 +570,17 @@ def main(cfg: DictConfig):
 
         with executor.batch():
             for train_ratio in tqdm(train_ratios, desc="Training Size"):
-                train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-                run_size = test_size + train_size
+                train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
+                val_size = int(test_ratio * train_val_subs)
+                run_size = val_size + train_size
                 train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
-                for fold, (train_idx, val_idx) in enumerate(tqdm(kf.split(train_val_idx), desc="Fold")):
+                
+                
+                for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)): # kf.split gives indices OF INDICES
+                    
+                    train_idx = train_val_idx[train_idx_idx]
+                    val_idx = train_val_idx[val_idx_idx]
+                    
                     np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
                     np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
                     run_model = ModelRun()
@@ -564,10 +589,8 @@ def main(cfg: DictConfig):
                                           fold,
                                           train_idx,
                                           val_idx,
-                                          train_val_dataset,
-                                          test_dataset,
+                                          test_idx,
                                           train_ratio,
-                                          run_size,
                                           dataset,
                                           cfg,
                                           random_state=random_state,
@@ -585,10 +608,15 @@ def main(cfg: DictConfig):
     else:
         run_results = []
         for train_ratio in tqdm(train_ratios, desc="Training Size"):
-            train_size = int(n_sub * (1 - test_ratio) * train_ratio)
-            run_size = test_size + train_size
+            train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
+            val_size = int(test_ratio * train_val_subs)
+            run_size = val_size + train_size
             train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
-            for fold, (train_idx, val_idx) in enumerate(tqdm(kf.split(train_val_idx), desc="Fold")):
+            for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)): # kf.split gives indices OF INDICES
+                
+                train_idx = train_val_idx[train_idx_idx]
+                val_idx = train_val_idx[val_idx_idx]
+                
                 np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
                 np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
                 run_model = ModelRun()
@@ -596,10 +624,8 @@ def main(cfg: DictConfig):
                                 fold,
                                 train_idx,
                                 val_idx,
-                                train_val_dataset,
-                                test_dataset,
+                                test_idx,
                                 train_ratio,
-                                run_size,
                                 dataset,
                                 cfg,
                                 random_state=random_state,

@@ -62,7 +62,9 @@ def main(cfg: DictConfig):
     synth_exp = cfg.synth_exp
     dataset = MatData(dataset_path, targets, synth_exp, reduced_mat=False, threshold=0)
     indices = np.arange(len(dataset))
-
+    train_ratios = list(cfg.train_ratio)
+    test_ratio = cfg.test_ratio
+    
     if cfg.external_test_mode: # deserves a separate function in the long run
         test_scanners = list(cfg.test_scanners)
         xr_dataset = xr.open_dataset(cfg.dataset_path)
@@ -74,10 +76,14 @@ def main(cfg: DictConfig):
         print("Size of train set: ", len(train_val_idx))
         del xr_dataset
     else:
-        train_val_idx, test_idx = train_test_split(indices, test_size=cfg.test_size, random_state=random_state)
-
-    train_val_dataset = Subset(dataset, train_val_idx)
+        train_val_idx, test_idx = train_test_split(indices, test_size=test_ratio, random_state=random_state)
+        
+    train_val_subs = len(train_val_idx)
     test_dataset = Subset(dataset, test_idx)
+    
+    test_idx = test_idx[test_idx!=249]
+    train_val_idx = train_val_idx[train_val_idx!=249]
+    
     np.save(f"{results_dir}/test_idx.npy", test_idx)
     
     kf = KFold(n_splits=cfg.kfolds, shuffle=True, random_state=random_state)
@@ -96,10 +102,33 @@ def main(cfg: DictConfig):
         )
         fold_jobs = []
         with executor.batch():
-            for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
-                run_train_fold = FoldTrain()
-                job = executor.submit(run_train_fold, fold, train_mat_autoencoder, train_idx, val_idx, train_val_dataset, model_params_dir = model_params_dir, cfg =cfg, random_state = random_state)
-                fold_jobs.append(job)
+            for train_ratio in tqdm(train_ratios, desc="Training Size"):
+                train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
+                val_size = int(test_ratio * train_val_subs)
+                run_size = val_size + train_size
+                train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
+                
+                for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)):
+                    
+                    train_idx = train_val_idx[train_idx_idx]
+                    val_idx = train_val_idx[val_idx_idx]
+                    
+                    np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+                    np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
+                    
+                    run_train_fold = FoldTrain()
+                    job = executor.submit(run_train_fold,
+                                          fold,
+                                          train_mat_autoencoder,
+                                          train_idx,
+                                          val_idx,
+                                          train_ratio,
+                                          dataset,
+                                          model_params_dir = model_params_dir,
+                                          cfg =cfg,
+                                          random_state = random_state
+                                         )
+                    fold_jobs.append(job)
 
         async def get_result(fold_jobs):
             fold_results = []
@@ -112,7 +141,16 @@ def main(cfg: DictConfig):
         fold_results = []
         for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
             run_train_fold = FoldTrain()
-            job = run_train_fold(fold, train_mat_autoencoder, train_idx, val_idx, train_val_dataset, model_params_dir = model_params_dir, cfg =cfg, random_state = random_state)
+            job = run_train_fold(fold,
+                                train_mat_autoencoder,
+                                train_idx,
+                                val_idx,
+                                train_ratio,
+                                dataset,
+                                model_params_dir = model_params_dir,
+                                cfg =cfg,
+                                random_state = random_state
+                                )
             fold_results.append(job)
     # TEST
     executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
@@ -124,8 +162,13 @@ def main(cfg: DictConfig):
             # nodes=1
     )
     best_fold = get_best_fold(fold_results)
-    job = executor.submit(test_mat_autoencoder, best_fold = best_fold, test_dataset =test_dataset, cfg = cfg, model_params_dir = model_params_dir,
-                            recon_mat_dir = recon_mat_dir, device = device)
+    job = executor.submit(test_mat_autoencoder, 
+                          train_ratio=train_ratio,
+                          best_fold = best_fold,
+                          test_dataset=test_dataset,
+                          cfg = cfg,
+                          model_params_dir = model_params_dir,
+                          recon_mat_dir = recon_mat_dir, device = device)
     output = job.result()
     return output
 # -
