@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
 from scipy.stats import spearmanr
 from sklearn.model_selection import (
     train_test_split,
@@ -317,10 +318,9 @@ def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model
     target_decoding_crit = EMB_LOSSES[cfg.target_decoding_crit]
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    # optimizer = torch.optim.SGD(model.parameters(), lr=cfg.lr, weight_decay=weight_decay,
-    #                             momentum=0.9)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, factor=0.1, patience = cfg.scheduler_patience)
-
+    optimizer = torch.optim.SGD(model.parameters(), lr=cfg.lr, weight_decay=weight_decay,
+                                momentum=0.9)
+    scheduler = StepLR(optimizer, step_size=40, gamma=0.1)
     loss_terms = []
     validation = []
 
@@ -507,7 +507,7 @@ def train(fold, train_ratio, train_dataset, val_dataset, B_init_fMRI, cfg, model
                 'Target Corr/val': corr_batch,
                 })
             
-            scheduler.step(mape_batch)
+            scheduler.step()
             if np.log10(scheduler._last_lr[0]) < -7:
                 break
 
