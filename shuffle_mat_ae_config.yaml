@@ -1,5 +1,5 @@
 project: "MatAE"
-experiment_name: "pretrain_mat_ae_hcp"
+experiment_name: "shuffle_pretrain_mat_ae_hcp"
 
 # hydra:
 #   run:
@@ -8,7 +8,7 @@ experiment_name: "pretrain_mat_ae_hcp"
 hypothesis: "-"
 # Training parameters
 multi_gpu: True
-num_epochs: 200
+num_epochs: 300
 batch_size: 128
 kfolds: 5
 lr: 0.001
@@ -16,7 +16,7 @@ weight_decay: 0
 dropout_rate: 0
 scheduler_patience: 10
 test_ratio : 0.3
-seed : 42
+random_seed: [1001, 42, 54, 90, 101, 80, 422, 142, 128, 340]
 log_gradients: True
 clip_grad: True
 synth_exp: False
@@ -32,7 +32,7 @@ test_scanners:
 # enhancements
 ReEig: False
 skip_enc1: False
-skip_conn: True
+skip_conn: False
 
 # Model dimensions
 input_dim_feat: 400
@@ -53,7 +53,10 @@ SupCon_kernel: cauchy
 best_fold: 2
 
 # Paths for data
-dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/hcp_kong_400parcels.nc"
+dataset:
+    name: "hcp"
+    dataset_path: /well/margulies/users/cpy397/contrastive-learning/data/${dataset.name}_400parcels.nc
+    
 targets:
     - CogTotalComp_AgeAdj # used is supervised
 

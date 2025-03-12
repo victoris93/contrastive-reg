@@ -49,7 +49,7 @@ SUPCON_KERNELS = {
     }
      
 #Input to the train autoencoder function is train_dataset.dataset.matrices
-def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, device, model=None):
+def train_mat_autoencoder(train_dataset, val_dataset, B_init_fMRI, run_type, run_id, cfg, device, model=None):
 
     wandb.init(project=cfg.project,
        mode = "offline",
@@ -140,8 +140,8 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
                     features = features.to(device)
 
                     embedded_feat = model.encode_feat(features)
-                    save_embeddings(embedded_feat, "mat", test = False, cfg = cfg, fold = fold, epoch = epoch)
                     reconstructed_feat = model.decode_feat(embedded_feat)
+                    
                     
                     val_loss += criterion(features, reconstructed_feat)
                     val_mean_corr += mean_correlations_between_subjects(features, reconstructed_feat)
@@ -152,7 +152,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             val_mape /= len(val_loader)
             
             wandb.log({
-                "Fold" : fold,
+                run_type : run_id,
                 "Epoch" : epoch,
                 "Loss/val" : val_loss.item(),
                 "Metric/val_mean_corr" : val_mean_corr,
@@ -165,7 +165,7 @@ def train_mat_autoencoder(fold, train_dataset, val_dataset, B_init_fMRI, cfg, de
             if np.log10(scheduler._last_lr[0]) < -4:
                 break
 
-            pbar.set_postfix_str(f"Epoch {epoch} | Fold {fold} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
+            pbar.set_postfix_str(f"Epoch {epoch} | {run_type} {run_id} | Train Loss {loss:.02f} | Val Loss {val_loss:.02f} | Val Mean Corr {val_mean_corr:.02f} | Val MAPE {val_mape:.02f} | log10 lr {np.log10(scheduler._last_lr[0])}") # Train corr {train_mean_corr:.02f}| Train mape {train_mape:.02f}
             
     wandb.finish()
     print(loss_terms)
