@@ -18,40 +18,50 @@ import submitit
 import pickle
 
 
-class FoldTrain(submitit.helpers.Checkpointable):
+class AETrain(submitit.helpers.Checkpointable):
     def __init__(self):
         self.results = None
 
-    def __call__(self, fold, train_func, train_idx, val_idx, train_ratio, dataset, model_params_dir, cfg, random_state=None, device=None, path = None):
+    def __call__(self,train_func, train_idx, val_idx, train_ratio, dataset, model_params_dir, cfg, fold=None, random_state=None, device=None, path = None):
 
         if self.results is None:
             if device is None:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if not isinstance(random_state, np.random.RandomState):
-                random_state = np.random.RandomState(random_state)
-        
-        self.fold = fold
-        
-        print(f"Fold {self.fold}")
+                seed = random_state
+                random_state = np.random.RandomState(seed)
+                
+        if fold is not None:
+            self.run_type = "fold"
+            self.run_id = fold
+        else:
+            self.run_type = "seed"
+            self.run_id = seed
+            
+        print(f"Run Type {self.run_type}, Run ID {self.run_id}")
         fold_train_dataset = Subset(dataset, train_idx)
         fold_val_dataset = Subset(dataset, val_idx)
 
-        if cfg.input_type == "matrices":
-            input_dim_feat=cfg.input_dim_feat
-            output_dim_feat=cfg.output_dim_feat
-            
-            train_features = fold_train_dataset.dataset.matrices[fold_train_dataset.indices]
-            mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
-            [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
-            B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
-    
-            loss_terms, trained_weights, val_loss = train_func(self.fold, fold_train_dataset, fold_val_dataset, B_init_fMRI, cfg, device)
-        else:
-            loss_terms, trained_weights, val_loss = train_func(self.fold, fold_train_dataset, fold_val_dataset, cfg, device)
-
-        torch.save(trained_weights, f"{model_params_dir}/autoencoder_weights_fold{self.fold}_train_ratio{train_ratio}.pth")
+        input_dim_feat=cfg.input_dim_feat
+        output_dim_feat=cfg.output_dim_feat
         
-        self.results = {"fold": self.fold,
+        train_features = fold_train_dataset.dataset.matrices[fold_train_dataset.indices]
+        mean_f = torch.mean(torch.tensor(train_features), dim=0).to(device)
+        [D,V] = torch.linalg.eigh(mean_f,UPLO = "U")     
+        B_init_fMRI = V[:,input_dim_feat-output_dim_feat:]
+
+        loss_terms, trained_weights, val_loss = train_func(fold_train_dataset,
+                                                           fold_val_dataset,
+                                                           B_init_fMRI,
+                                                           self.run_type,
+                                                           self.run_id,
+                                                           cfg,
+                                                           device)
+
+
+        torch.save(trained_weights, f"{model_params_dir}/autoencoder_weights_{self.run_type}{self.run_id}_train_ratio{train_ratio}.pth")
+        
+        self.results = {self.run_type: self.run_id,
                         "val_loss": val_loss,
                         } 
         return self.results

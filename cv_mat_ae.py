@@ -32,7 +32,7 @@ from ContModeling.modeling import test_mat_autoencoder, train_mat_autoencoder
 from ContModeling.utils import get_best_fold, mape_between_subjects, mean_correlations_between_subjects
 from ContModeling.losses import LogEuclideanLoss, NormLoss
 from ContModeling.models import MatAutoEncoder
-from ContModeling.helper_classes import MatData, FoldTrain
+from ContModeling.helper_classes import MatData, AETrain
 
 print("Fetching device...")
 torch.cuda.empty_cache()
@@ -41,7 +41,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #Input to the train autoencoder function is train_dataset.dataset.matrices
 
 # +
-@hydra.main(config_path=".", config_name="mat_autoencoder_config")
+@hydra.main(config_path=".", config_name="cv_mat_ae_config")
 
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
@@ -57,35 +57,30 @@ def main(cfg: DictConfig):
     
     random_state = np.random.RandomState(seed=cfg.seed)
     
-    dataset_path = cfg.dataset_path
+    dataset_path = cfg.dataset.dataset_path
     targets = list(cfg.targets)
     synth_exp = cfg.synth_exp
     dataset = MatData(dataset_path, targets, synth_exp, reduced_mat=False, threshold=0)
-    indices = np.arange(len(dataset))
+    n_sub = len(dataset)
+    indices = np.arange(n_sub)
+    indices = indices[indices!=249] # remove the sub 249 with nans in the matrix
+    
     train_ratios = list(cfg.train_ratio)
-    test_ratio = cfg.test_ratio
+    # test_ratio = cfg.test_ratio
     
-    if cfg.external_test_mode: # deserves a separate function in the long run
-        test_scanners = list(cfg.test_scanners)
-        xr_dataset = xr.open_dataset(cfg.dataset_path)
-        scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
-                              axis = 0).astype(bool)
-        test_idx = indices[scanner_mask]
-        print("Size of test set: ", len(test_idx))
-        train_val_idx = indices[~scanner_mask]
-        print("Size of train set: ", len(train_val_idx))
-        del xr_dataset
-    else:
-        train_val_idx, test_idx = train_test_split(indices, test_size=test_ratio, random_state=random_state)
-        
-    train_val_subs = len(train_val_idx)
-    test_dataset = Subset(dataset, test_idx)
-    
-    test_idx = test_idx[test_idx!=249]
-    train_val_idx = train_val_idx[train_val_idx!=249]
-    
-    np.save(f"{results_dir}/test_idx.npy", test_idx)
-    
+    # if cfg.external_test_mode: # deserves a separate function in the long run
+    #     test_scanners = list(cfg.test_scanners)
+    #     xr_dataset = xr.open_dataset(cfg.dataset_path)
+    #     scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
+    #                           axis = 0).astype(bool)
+    #     test_idx = indices[scanner_mask]
+    #     print("Size of test set: ", len(test_idx))
+    #     train_val_idx = indices[~scanner_mask]
+    #     print("Size of train set: ", len(train_val_idx))
+    #     del xr_dataset
+    # else:
+    #     train_val_idx, test_idx = train_test_split(indices, test_size=test_ratio, random_state=random_state)
+                
     kf = KFold(n_splits=cfg.kfolds, shuffle=True, random_state=random_state)
     multi_gpu = cfg.multi_gpu
     
@@ -103,22 +98,19 @@ def main(cfg: DictConfig):
         fold_jobs = []
         with executor.batch():
             for train_ratio in tqdm(train_ratios, desc="Training Size"):
-                train_size = int(train_val_subs * (1 - test_ratio) * train_ratio)
-                val_size = int(test_ratio * train_val_subs)
-                run_size = val_size + train_size
-                train_val_idx = random_state.choice(train_val_idx, run_size, replace=False)
-                
-                for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(train_val_idx)):
+                for fold, (train_idx_idx, val_idx_idx) in enumerate(kf.split(indices)): # kf.split gives indices OF INDICES
                     
-                    train_idx = train_val_idx[train_idx_idx]
-                    val_idx = train_val_idx[val_idx_idx]
+                    train_size = int(len(train_idx_idx) * train_ratio)                
+                    train_idx_idx = random_state.choice(train_idx_idx, train_size, replace=False)
+                    
+                    train_idx = indices[train_idx_idx]
+                    val_idx = indices[val_idx_idx]
                     
                     np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
-                    np.save(f"{results_dir}/val_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
+                    np.save(f"{results_dir}/validation_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
                     
-                    run_train_fold = FoldTrain()
+                    run_train_fold = AETrain()
                     job = executor.submit(run_train_fold,
-                                          fold,
                                           train_mat_autoencoder,
                                           train_idx,
                                           val_idx,
@@ -126,6 +118,7 @@ def main(cfg: DictConfig):
                                           dataset,
                                           model_params_dir = model_params_dir,
                                           cfg =cfg,
+                                          fold=fold,
                                           random_state = random_state
                                          )
                     fold_jobs.append(job)
@@ -139,38 +132,48 @@ def main(cfg: DictConfig):
         fold_results = asyncio.run(get_result(fold_jobs))
     else:
         fold_results = []
-        for fold, (train_idx, val_idx) in enumerate(kf.split(train_val_idx)):
-            run_train_fold = FoldTrain()
-            job = run_train_fold(fold,
-                                train_mat_autoencoder,
+        for fold, (train_idx, val_idx) in enumerate(kf.split(indices)):
+            
+            train_size = int(len(train_idx_idx) * train_ratio)                
+            train_idx_idx = random_state.choice(train_idx_idx, train_size, replace=False)
+            
+            train_idx = indices[train_idx_idx]
+            val_idx = indices[val_idx_idx]
+            
+            np.save(f"{results_dir}/train_idx_fold{fold}_train_ratio{train_ratio}.npy", train_idx)
+            np.save(f"{results_dir}/validation_idx_fold{fold}_train_ratio{train_ratio}.npy", val_idx)
+                    
+            run_train_fold = AETrain()
+            job = run_train_fold(train_mat_autoencoder,
                                 train_idx,
                                 val_idx,
                                 train_ratio,
                                 dataset,
-                                model_params_dir = model_params_dir,
+                                model_params_dir=model_params_dir,
                                 cfg =cfg,
-                                random_state = random_state
+                                fold=fold,
+                                random_state=random_state
                                 )
             fold_results.append(job)
     # TEST
-    executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
-    executor.update_parameters(
-            timeout_min=240,
-            slurm_partition="gpu_short",
-            gpus_per_node=1,
-            # tasks_per_node=1,
-            # nodes=1
-    )
-    best_fold = get_best_fold(fold_results)
-    job = executor.submit(test_mat_autoencoder, 
-                          train_ratio=train_ratio,
-                          best_fold = best_fold,
-                          test_dataset=test_dataset,
-                          cfg = cfg,
-                          model_params_dir = model_params_dir,
-                          recon_mat_dir = recon_mat_dir, device = device)
-    output = job.result()
-    return output
+    # executor = submitit.AutoExecutor(folder=str(Path("./logs") / "%j"))
+    # executor.update_parameters(
+    #         timeout_min=240,
+    #         slurm_partition="gpu_short",
+    #         gpus_per_node=1,
+    #         # tasks_per_node=1,
+    #         # nodes=1
+    # )
+    # best_fold = get_best_fold(fold_results)
+    # job = executor.submit(test_mat_autoencoder, 
+    #                       train_ratio=train_ratio,
+    #                       best_fold = best_fold,
+    #                       test_dataset=test_dataset,
+    #                       cfg = cfg,
+    #                       model_params_dir = model_params_dir,
+    #                       recon_mat_dir = recon_mat_dir, device = device)
+    # output = job.result()
+    return fold_results
 # -
 
 if __name__ == "__main__":

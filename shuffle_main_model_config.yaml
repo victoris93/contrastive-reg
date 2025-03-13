@@ -1,5 +1,5 @@
-project: "HCP_REDMAT_ENC_MULTIVAR"
-experiment_name: "redmat_enc_hcp_multivar"
+project: "HCP_SHUFFLE_REDMAT_ENC_UNIVAR"
+experiment_name: "shuffle_redmat_enc_hcp_univar"
 hypothesis: "-"
 
 # hydra:
@@ -10,7 +10,7 @@ hypothesis: "-"
 input_dim_feat: 400
 output_dim_feat: 100
 hidden_dim: 128
-input_dim_target: 26
+input_dim_target: 1
 output_dim_target: 64
 random_seed: [1001, 42, 54, 90, 101, 80, 422, 142, 128, 340]
 
@@ -19,13 +19,14 @@ skip_conn: False
 skip_enc1: False
 ReEig: False
 
-kfolds: 5
 # Pretrained models options
 full_model_pretrained: False
 mat_ae_pretrained: True
+reduced_mat_ae_pretrained: False
 
-mat_ae_pretrained_exp: "pretrain_mat_ae_hcp"
-full_model_pretrained_exp: "1run_train_redmat_enc_hcp_sup_net_latest"
+mat_ae_pretrained_exp: "shuffle_pretrain_mat_ae_hcp"
+pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
+full_model_pretrained_exp: "shuffle_redmat_enc_hcp_multivar"
 
 mat_ae_enc_freeze: True
 mat_ae_dec_freeze: True
@@ -43,6 +44,7 @@ synth_exp: False
 multi_gpu: True
 num_epochs: 500
 batch_size: 256
+n_runs: 1
 lr: 0.001
 weight_decay: 0.0001
 dropout_rate: 0
@@ -75,6 +77,7 @@ ptt_temperature: 0.07
 ptt_sigma: 0.2
 ptt_reg_term: 0.01
 
+
 # Other losses
 feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
 joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
@@ -85,35 +88,38 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset_path: "/well/margulies/users/cpy397/contrastive-learning/data/hcp_kong_400parcels.nc"
+dataset:
+    name: "hcp"
+    dataset_path: /well/margulies/users/cpy397/contrastive-learning/data/${dataset.name}_400parcels.nc
 # dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
     - PicVocab_AgeAdj
-    - ReadEng_AgeAdj
-    - WM_Task_2bk_Acc
-    - Relational_Task_Acc
-    - Language_Task_Story_Acc
-    - PMAT24_A_CR
-    - VSPLOT_TC
-    - CardSort_AgeAdj
-    - ListSort_AgeAdj
-    - Language_Task_Math_Acc
-    - ProcSpeed_AgeAdj
-    - PicSeq_AgeAdj
-    - SCPT_SPEC
-    - Flanker_AgeAdj
-    - Emotion_Task_Face_Acc
-    - IWRD_TOT
-    - Dexterity_AgeAdj
-    - ER40_CR
-    - ER40SAD
-    - ER40ANG
-    - ER40NOE
-    - MMSE_Score
-    - ER40HAP
-    - SCPT_SEN
-    - Social_Task_Perc_Random
-    - ER40FEAR
+    # - ReadEng_AgeAdj
+    # - WM_Task_2bk_Acc
+    # - Relational_Task_Acc
+    # - Language_Task_Story_Acc
+    # - PMAT24_A_CR
+    # - VSPLOT_TC
+    # - CardSort_AgeAdj
+    # - ListSort_AgeAdj
+    # - Language_Task_Math_Acc
+    # - ProcSpeed_AgeAdj
+    # - PicSeq_AgeAdj
+    # - SCPT_SPEC
+    # - Flanker_AgeAdj
+    # - Emotion_Task_Face_Acc
+    # - IWRD_TOT
+    # - Dexterity_AgeAdj
+    # - ER40_CR
+    # - ER40SAD
+    # - ER40ANG
+    # - ER40NOE
+    # - MMSE_Score
+    # - ER40HAP
+    # - SCPT_SEN
+    # - Social_Task_Perc_Random
+    # - ER40FEAR
+
     
 standardize_target: True
 
@@ -123,7 +129,6 @@ reconstructed_dir : recon_mat
 embedding_dir : embeddings
 model_weight_dir : saved_models
 output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
-
 # work_dir: "/data/parietal/store/work/vshevche"
 # embedding_dir : embeddings
 # reconstructed_dir : recon_mat
