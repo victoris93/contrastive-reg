@@ -1,5 +1,5 @@
 project: "MatAE"
-experiment_name: "shuffle_pretrain_mat_ae_hcp"
+experiment_name: "shuffle_pretrain_mat_ae_abcd"
 
 # hydra:
 #   run:
@@ -54,11 +54,11 @@ best_fold: 2
 
 # Paths for data
 dataset:
-    name: "hcp"
+    name: "abcd"
     dataset_path: /well/margulies/users/cpy397/contrastive-learning/data/${dataset.name}_400parcels.nc
     
 targets:
-    - CogTotalComp_AgeAdj # used is supervised
+    - nihtbx_picvocab_agecorrected # used is supervised
 
 # Directory for saving results
 work_dir: "/well/margulies/users/cpy397/contrastive-learning"
