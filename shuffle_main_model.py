@@ -34,7 +34,7 @@ from ContModeling.utils import (
     gaussian_kernel,
     cauchy,
     rbf,
-    standardize,
+    standardize_target,
     save_embeddings,
     filter_nans
 )
@@ -49,7 +49,7 @@ from ContModeling.viz_func import (
 
 torch.cuda.empty_cache()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("mps")
 
 EMB_LOSSES ={
     'Norm': NormLoss(),
@@ -77,7 +77,7 @@ class ModelRun(submitit.helpers.Checkpointable):
     def __call__(self, train, train_idx, val_idx, train_ratio, dataset, cfg, fold=None, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                device = torch.device("cuda" if torch.cuda.is_available() else "mps")
                 print(f"Device {device}, ratio {train_ratio}", flush=True)
             if not isinstance(random_state, np.random.RandomState):
                 seed = random_state
@@ -124,8 +124,23 @@ class ModelRun(submitit.helpers.Checkpointable):
 
             train_dataset = Subset(dataset, train_idx)
             val_dataset = Subset(dataset, val_idx)
-
+            
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
+
+            if cfg.standardize_target:
+                target_names = dataset.target_names
+                train_targets = train_dataset.dataset.targets[train_dataset.indices]
+                for i, target_name in enumerate(target_names):
+                    print(f"Standardizing target {target_name} (min: {np.nanmin(train_targets[:, i])}, max: {np.nanmax(train_targets[:, i])}) to [0, 1] in train")
+                    train_targets[:, i] = standardize_target(train_targets[:, i])
+                
+                test_targets = val_dataset.dataset.targets[val_dataset.indices]
+                for i, target_name in enumerate(target_names):
+                    print(f"Standardizing target {target_name} (min: {np.nanmin(test_targets[:, i])}, max: {np.nanmax(test_targets[:, i])}) to [0, 1] in test")
+                    test_targets[:, i] = standardize_target(test_targets[:, i])
+
+                train_dataset.dataset.targets[train_dataset.indices] = train_targets
+                val_dataset.dataset.targets[val_dataset.indices] = test_targets
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
@@ -567,7 +582,7 @@ def main(cfg: DictConfig):
         
     test_ratio = cfg.test_ratio
 
-    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, standardize_target=cfg.standardize_target, threshold=cfg.mat_threshold)
+    dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     indices = np.arange(n_sub)
 
