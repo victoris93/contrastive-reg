@@ -157,6 +157,10 @@ def standardize(data, mean=None, std=None, epsilon = 1e-4): # any variable
         std = np.std(data, axis=0)+ epsilon
     return (data - mean)/std, mean, std
 
+def standardize_target(target):
+    eps = 0 # avoid division by zero
+    target = (target - np.nanmin(target)) / (np.nanmax(target) - np.nanmin(target)) + eps
+    return target
 
 def standardize_dataset(dataset):
     features = torch.vstack([dataset[i][0] for i in range(len(dataset))])
@@ -198,5 +202,3 @@ def cauchy(x, krnl_sigma):
     else:
         x = x - x.T
     return 1.0 / (krnl_sigma * (x**2) + 1)
-
-

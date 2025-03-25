@@ -76,7 +76,7 @@ class AETrain(submitit.helpers.Checkpointable):
 
 
 class MatData(Dataset):
-    def __init__(self, dataset_path, target_names, synth_exp=False, standardize_target=False, reduced_mat=False, vectorize=False, threshold=0):
+    def __init__(self, dataset_path, target_names, synth_exp=False, reduced_mat=False, vectorize=False, threshold=0):
         if not isinstance(target_names, list):
             target_names = [target_names]
         self.target_names = target_names
@@ -94,12 +94,6 @@ class MatData(Dataset):
             self.matrices = sym_matrix_to_vec(self.matrices)
             
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
-        
-        if standardize_target:
-            for i, target_name in enumerate(self.target_names):
-                print(f"Standardizing target {target_name} (min: {np.nanmin(self.targets[:, i])}, max: {np.nanmax(self.targets[:, i])}) to [0, 1]")
-                eps = 0 # avoid division by zero
-                self.targets[:, i] = (self.targets[:, i] - np.nanmin(self.targets[:, i])) / (np.nanmax(self.targets[:, i]) - np.nanmin(self.targets[:, i])) + eps
 
         if threshold > 0:
             self.matrices = self.threshold_mat()
