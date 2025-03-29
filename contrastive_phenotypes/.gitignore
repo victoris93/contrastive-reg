@@ -1,5 +1,6 @@
 ContModeling.egg-info
 .DS_Store
+.ipynb_checkpoints/
 src/ContModeling.egg-info
 src/ContModeling/.DS_Store
 src/.DS_Store

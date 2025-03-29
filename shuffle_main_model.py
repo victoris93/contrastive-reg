@@ -49,7 +49,7 @@ from ContModeling.viz_func import (
 
 torch.cuda.empty_cache()
 
-device = torch.device("mps")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 EMB_LOSSES ={
     'Norm': NormLoss(),
@@ -77,7 +77,7 @@ class ModelRun(submitit.helpers.Checkpointable):
     def __call__(self, train, train_idx, val_idx, train_ratio, dataset, cfg, fold=None, random_state=None, device=None, save_model = True, path: Path = None):
         if self.results is None:
             if device is None:
-                device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 print(f"Device {device}, ratio {train_ratio}", flush=True)
             if not isinstance(random_state, np.random.RandomState):
                 seed = random_state
@@ -432,8 +432,10 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
                 if not cfg.reduced_mat_ae_enc_freeze:
                     ## KERNLIZED LOSS: MAT embedding vs targets
                     kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
-                    kernel_embedded_network_loss, _ = criterion_pft(reduced_mat_embedding_norm.unsqueeze(1), inter_network_conn)
-                    loss += (kernel_embedded_target_loss + kernel_embedded_network_loss)
+                    loss += kernel_embedded_target_loss
+                    if cfg.network_loss:
+                        kernel_embedded_network_loss, _ = criterion_pft(reduced_mat_embedding_norm.unsqueeze(1), inter_network_conn)
+                        loss += kernel_embedded_network_loss
 
                 if not cfg.mat_ae_enc_freeze or not cfg.mat_ae_dec_freeze:
                     feature_autoencoder_loss = feature_autoencoder_crit(features, reconstructed_feat) / 1000
@@ -464,15 +466,23 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
 
                 if not cfg.reduced_mat_ae_enc_freeze:
                     loss_terms_batch['kernel_embedded_target_loss'] = kernel_embedded_target_loss.item() / len(features)
-                    loss_terms_batch['kernel_embedded_network_loss'] = kernel_embedded_network_loss.item() / len(features)
+                    if cfg.network_loss:
+                        loss_terms_batch['kernel_embedded_network_loss'] = kernel_embedded_network_loss.item() / len(features)
 
                     wandb.log({
                         'Epoch': epoch,
                         run_type: run_id,
                         "Train ratio": train_ratio,
                         'kernel_embedded_target_loss': loss_terms_batch['kernel_embedded_target_loss'],
-                        'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
                     })
+
+                    if cfg.network_loss:
+                        wandb.log({
+                            'Epoch': epoch,
+                            run_type: run_id,
+                            "Train ratio": train_ratio,
+                            'kernel_embedded_network_loss': loss_terms_batch['kernel_embedded_network_loss'],
+                        })
 
                 if not cfg.reduced_mat_ae_dec_freeze:
                     loss_terms_batch['reduced_mat_recon_loss'] = reduced_mat_recon_loss.item() / len(features)
@@ -570,6 +580,8 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
 @hydra.main(config_path=".", config_name="shuffle_main_model_config")
 def main(cfg: DictConfig):
 
+    print("Experiment: ", cfg.experiment_name)
+    print("Dataset: ", cfg.dataset.name)
     results_dir = os.path.join(cfg.output_dir, cfg.experiment_name)
     os.makedirs(results_dir, exist_ok=True)
 
@@ -580,8 +592,6 @@ def main(cfg: DictConfig):
     else:
         targets = list(cfg.targets)
         
-    test_ratio = cfg.test_ratio
-
     dataset = MatData(dataset_path, targets, synth_exp = cfg.synth_exp, threshold=cfg.mat_threshold)
     n_sub = len(dataset)
     indices = np.arange(n_sub)

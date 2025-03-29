@@ -2,9 +2,8 @@ project: "HCP_SHUFFLE_REDMAT_DEC_MULTIVAR_PSY_ONLY"
 experiment_name: "shuffle_redmat_dec_hcp_multivar_psy_only"
 hypothesis: "-"
 
-# hydra:
-#   run:
-#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+defaults:
+  - hpc: cineca
 
 # Model dimensions
 input_dim_feat: 400
@@ -88,9 +87,7 @@ huber_delta: 10
 augmentation: None
 mat_threshold: 0
 # Paths for data
-dataset:
-    name: "hcp"
-    dataset_path: /gpfs3/well/margulies/users/cpy397/contrastive-learning/data/${dataset.name}_400parcels.nc
+
 # dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
 targets:
 
@@ -153,11 +150,11 @@ targets:
 standardize_target: True
 
 # Directory for saving results
-work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
-reconstructed_dir : recon_mat
-embedding_dir : embeddings
-model_weight_dir : saved_models
-output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
+# work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+# reconstructed_dir : recon_mat
+# embedding_dir : embeddings
+# model_weight_dir : saved_models
+# output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
 # work_dir: "/data/parietal/store/work/vshevche"
 # embedding_dir : embeddings
 # reconstructed_dir : recon_mat
