@@ -1,0 +1,162 @@
+project: "HCP_SHUFFLE_REDMAT_DEC_MULTIVAR_PSY_ONLY"
+experiment_name: "shuffle_redmat_dec_hcp_multivar_psy_only"
+hypothesis: "-"
+
+defaults:
+  - hpc: cineca
+
+# Model dimensions
+input_dim_feat: 400
+output_dim_feat: 100
+hidden_dim: 128
+input_dim_target: 17
+output_dim_target: 64
+random_seed: [1001, 42, 54, 90, 101, 80, 422, 142, 128, 340]
+
+# MatAutoencoder options
+skip_conn: False
+skip_enc1: False
+ReEig: False
+
+# Pretrained models options
+full_model_pretrained: True
+mat_ae_pretrained: False
+reduced_mat_ae_pretrained: False
+
+mat_ae_pretrained_exp: "shuffle_pretrain_mat_ae_hcp"
+pretrained_reduced_mat_ae_exp: "ext_sup_reduced_mat_ae_abcd"
+full_model_pretrained_exp: "shuffle_redmat_enc_hcp_multivar_psy_only"
+
+mat_ae_enc_freeze: True
+mat_ae_dec_freeze: True
+
+reduced_mat_ae_enc_freeze: True
+reduced_mat_ae_dec_freeze: False
+
+target_dec_freeze: True
+
+best_mat_ae_fold: 2
+best_reduced_mat_ae_fold: 4
+synth_exp: False
+
+# Training parameters
+multi_gpu: False
+num_epochs: 500
+batch_size: 256
+n_runs: 1
+lr: 0.001
+weight_decay: 0.0001
+dropout_rate: 0
+scheduler_patience: 20
+test_ratio: 0.3 # makes no difference if some part of the model is pretrained or external test mode
+train_ratio: [1.0] # multiple values for a learning curve
+log_gradients: True
+clip_grad: True
+
+# test options
+external_test_mode: False # relevant if no part of the model is pretrained
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+
+# Contrastive loss parameters
+SupCon_kernel: rbf
+SupConLoss_on_mat: False
+
+## feature proj vs. targets
+pft_base_temperature: 0.07
+pft_temperature: 0.07
+pft_sigma: 0.2
+pft_reg_term: 0.01
+
+## target proj vs. targets
+ptt_base_temperature: 0.07
+ptt_temperature: 0.07
+ptt_sigma: 0.2
+ptt_reg_term: 0.01
+
+
+# Other losses
+feature_autoencoder_crit: Norm  # Options: Norm, MSE, LogEuclidean
+joint_embedding_crit: cosine  # Options: Norm, MSE, cosine
+target_decoding_crit: MSE  # Options: Norm, MSE
+huber_delta: 10
+
+# Data
+augmentation: None
+mat_threshold: 0
+# Paths for data
+
+# dataset_path: "/data/parietal/store/work/vshevche/data/hcp_kong_400parcels.nc"
+targets:
+
+# HCP COG
+    # - PicVocab_AgeAdj
+    # - ReadEng_AgeAdj
+    # - CogFluidComp_AgeAdj
+    # - CogTotalComp_AgeAdj
+    # - CogCrystalComp_AgeAdj
+    # - CardSort_AgeAdj
+    # - ListSort_AgeAdj
+    # - ProcSpeed_AgeAdj
+    # - PicSeq_AgeAdj
+    # - Flanker_AgeAdj
+
+# HCP PSY
+    - AngAffect_Unadj
+    - AngHostil_Unadj
+    - AngAggr_Unadj
+    - FearAffect_Unadj
+    - FearSomat_Unadj
+    - Sadness_Unadj
+    - LifeSatisf_Unadj
+    - MeanPurp_Unadj
+    - PosAffect_Unadj
+    - Friendship_Unadj
+    - Loneliness_Unadj
+    - PercHostil_Unadj
+    - PercReject_Unadj
+    - EmotSupp_Unadj
+    - InstruSupp_Unadj
+    - PercStress_Unadj
+    - SelfEff_Unadj
+    
+# ABCD COG
+    # - nihtbx_picvocab_agecorrected
+    # - nihtbx_flanker_agecorrected
+    # - nihtbx_list_agecorrected
+    # - nihtbx_cardsort_agecorrected
+    # - nihtbx_pattern_agecorrected
+    # - nihtbx_picture_agecorrected
+    # - nihtbx_reading_agecorrected
+    # - nihtbx_fluidcomp_agecorrected
+    # - nihtbx_cryst_agecorrected
+    # - nihtbx_totalcomp_agecorrected
+
+# ABCD PSY
+    # - cbcl_scr_syn_anxdep_t
+    # - cbcl_scr_syn_withdep_t
+    # - cbcl_scr_syn_somatic_t
+    # - cbcl_scr_syn_social_t
+    # - cbcl_scr_syn_thought_t
+    # - cbcl_scr_syn_attention_t
+    # - cbcl_scr_syn_rulebreak_t
+    # - cbcl_scr_syn_aggressive_t
+    # - cbcl_scr_syn_internal_t
+    # - cbcl_scr_syn_external_t
+    # - cbcl_scr_syn_totprob_t
+    
+standardize_target: True
+
+# Directory for saving results
+# work_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning"
+# reconstructed_dir : recon_mat
+# embedding_dir : embeddings
+# model_weight_dir : saved_models
+# output_dir: "/gpfs3/well/margulies/users/cpy397/contrastive-learning/results"
+# work_dir: "/data/parietal/store/work/vshevche"
+# embedding_dir : embeddings
+# reconstructed_dir : recon_mat
+# model_weight_dir : saved_models
+# output_dir: "/data/parietal/store/work/vshevche/results"

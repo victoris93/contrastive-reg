@@ -1,0 +1,68 @@
+project: "MatAE"
+experiment_name: "shuffle_pretrain_mat_ae_abcd"
+
+# hydra:
+#   run:
+#     dir: /data/parietal/store/work/vshevche/outputs/${now:%H-%M-%S}/${hydra.job.name}
+
+hypothesis: "-"
+# Training parameters
+multi_gpu: True
+num_epochs: 300
+batch_size: 128
+kfolds: 5
+lr: 0.001
+weight_decay: 0
+dropout_rate: 0
+scheduler_patience: 10
+test_ratio : 0.3
+random_seed: [1001, 42, 54, 90, 101, 80, 422, 142, 128, 340]
+log_gradients: True
+clip_grad: True
+synth_exp: False
+train_ratio: [1.0] # multiple values for a learning curve
+
+# test options
+external_test_mode: False
+test_scanners:
+    - "GE MEDICAL SYSTEMS_DISCOVERY MR750"
+    - "Philips Medical Systems_Achieva dStream"
+    - "Philips Medical Systems_Ingenia"
+
+# enhancements
+ReEig: False
+skip_enc1: False
+skip_conn: False
+
+# Model dimensions
+input_dim_feat: 400
+hidden_dim : 128
+output_dim_feat: 100
+output_dim_target: 64
+input_type: "matrices" # Options: matrices, reduced_mat
+
+# Loss function and optimizer
+loss_function: Norm  # Options: LogEuclidean, Norm, MSE
+supcon_base_temperature: 0.07
+supcon_temperature: 0.07
+supcon_sigma: 1
+supcon_reg_term: 0.01
+SupCon_kernel: cauchy
+
+# modify manually if test is run as a separate job
+best_fold: 2
+
+# Paths for data
+dataset:
+    name: "abcd"
+    dataset_path: /well/margulies/users/cpy397/contrastive-learning/data/${dataset.name}_400parcels.nc
+    
+targets:
+    - nihtbx_picvocab_agecorrected # used is supervised
+
+# Directory for saving results
+work_dir: "/well/margulies/users/cpy397/contrastive-learning"
+reconstructed_dir : recon_mat
+embedding_dir : embeddings
+model_weight_dir : saved_models
+output_dir: "/well/margulies/users/cpy397/contrastive-learning/results"
