@@ -110,18 +110,6 @@ class ModelRun(submitit.helpers.Checkpointable):
                 train_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/train_idx_{self.run_type}{self.run_id}_train_ratio{train_ratio}.npy")
                 val_idx = np.load(f"{cfg.output_dir}/{cfg.mat_ae_pretrained_exp}/{test_type}_idx_{self.run_type}{self.run_id}_train_ratio{train_ratio}.npy")
 
-            # elif cfg.external_test_mode:
-            #     test_scanners = list(cfg.test_scanners)
-            #     xr_dataset = xr.open_dataset(cfg.dataset_path)
-            #     scanner_mask = np.sum([xr_dataset.isin(scanner).scanner.values for scanner in test_scanners],
-            #                         axis = 0).astype(bool)
-            #     val_indices = fold_indices[scanner_mask]
-            #     train_indices = fold_indices[~scanner_mask]
-            #     if train_ratio < 1.0:
-            #         train_size = int(len(train_indices) * train_ratio)
-            #         train_indices = random_state.choice(train_indices, train_size, replace=False)
-            #     del xr_dataset
-
             train_dataset = Subset(dataset, train_idx)
             val_dataset = Subset(dataset, val_idx)
             
