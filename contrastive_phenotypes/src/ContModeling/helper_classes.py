@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader, Subset
 from nilearn.connectome import sym_matrix_to_vec, vec_to_sym_matrix
 import numpy as np
 import os
+from sklearn.decomposition import PCA
 import sys
 import pandas as pd
 import math
@@ -82,6 +83,7 @@ class MatData(Dataset):
         self.target_names = target_names
         self.threshold = threshold
         self.data_array = xr.open_dataset(dataset_path)
+        self.pca_features = None
         if reduced_mat:
             self.matrices = self.data_array.reduced_matrices.values.astype(np.float32)
         else:
@@ -91,7 +93,7 @@ class MatData(Dataset):
         self.inter_network_conn = torch.from_numpy(self.data_array.inter_network_conn.values).to(torch.float32)
 
         if vectorize:
-            self.matrices = sym_matrix_to_vec(self.matrices)
+            self.matrices = sym_matrix_to_vec(self.matrices, discard_diagonal=True)
             
         self.targets = np.array([self.data_array[target_name].values for target_name in self.target_names]).T
 
@@ -112,6 +114,15 @@ class MatData(Dataset):
         mask = np.abs(matrices) >= perc
         thresh_mat = matrices * mask
         return thresh_mat
+    
+    def compute_pca(self, pca_obj=None):
+        vec_features = sym_matrix_to_vec(self.matrices, discard_diagonal=True)
+        if pca_obj is None:
+            pca_obj = PCA(n_components=64).fit(vec_features)
+
+        pca_features = pca_obj.transform(vec_features)
+        self.pca_features = pca_features
+        return pca_obj
     
     def simulate_effect(self, matrices, targets):
         # hypothesis: positive connectivity is stronger
@@ -137,8 +148,11 @@ class MatData(Dataset):
     def __getitem__(self, idx):
         matrix = self.matrices[idx]
         target = self.targets[idx]
+        pca_feature = None
+        if self.pca_features is not None:
+            pca_feature = self.pca_features[idx]
         intra_network_conn_vect = self.intra_network_conn[idx]
         inter_network_conn_vect = self.inter_network_conn[idx]
         
-        return matrix, target, intra_network_conn_vect, inter_network_conn_vect
-
+        return matrix, pca_feature, target, intra_network_conn_vect, inter_network_conn_vect
+    

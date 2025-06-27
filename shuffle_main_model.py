@@ -22,6 +22,7 @@ from sklearn.model_selection import (
     train_test_split,
     KFold
 )
+from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from tqdm.auto import tqdm
 # from augmentations import augs, aug_args
@@ -115,6 +116,9 @@ class ModelRun(submitit.helpers.Checkpointable):
             
             train_features = train_dataset.dataset.matrices[train_dataset.indices]
 
+            pca_obj = train_dataset.compute_pca()
+            val_dataset.compute_pca(pca_obj)
+
             if cfg.standardize_target:
                 target_names = dataset.target_names
                 train_targets = train_dataset.dataset.targets[train_dataset.indices]
@@ -128,7 +132,6 @@ class ModelRun(submitit.helpers.Checkpointable):
                     test_targets[:, i] = standardize_target(test_targets[:, i])
 
                 train_dataset.dataset.targets[train_dataset.indices] = train_targets
-                val_dataset.dataset.targets[val_dataset.indices] = test_targets
 
             input_dim_feat =cfg.input_dim_feat
             output_dim_feat = cfg.output_dim_feat
@@ -169,17 +172,20 @@ class ModelRun(submitit.helpers.Checkpointable):
                     if label == 'train':
                         is_test = False
                     
-                    X, y, _, _ = zip(*d)
+                    X, X_pca, y, _, _ = zip(*d)
                     X = torch.stack(X)
+                    X_pca = torch.stack(X_pca)
                     y = torch.stack(y)
                     X, y, d_indices, _ = filter_nans(X, y, d_indices)
                     X = X.to(device)
+                    X_pca = X_pca.to(device)
                     y = y.to(device)
 
                     X_embedded = model.encode_features(X)
                     X_embedded = X_embedded.cpu().numpy()
                     X_embedded = torch.tensor(sym_matrix_to_vec(X_embedded)).to(torch.float32).to(device)
                     X_emb_reduced, X_emb_reduced_norm = model.encode_reduced_mat(X_embedded)
+                    X_emb_reduced_norm = X_emb_reduced_norm + nn.functional.normalize(X_pca, p=2, dim=1)
                     
                     np.save(f"{cfg.output_dir}/{cfg.experiment_name}/{label}_idx_{self.run_type}{self.run_id}_train_ratio{train_ratio}.npy", d_indices)
 
@@ -257,7 +263,13 @@ class ModelRun(submitit.helpers.Checkpointable):
         print("Checkpointing", flush=True)
         return super().checkpoint(*args, **kwargs)
 
-def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id, cfg, model=None, device=device):
+def train(train_ratio,
+          train_dataset,
+          val_dataset,
+          B_init_fMRI,
+          run_type,
+          run_id,
+          cfg, model=None, device=device):
     print(f"Start training...{run_type} {run_id}")
 
     # MODEL DIMS
@@ -379,7 +391,8 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
                 model.target_dec.eval()
                 
             loss_terms_batch = defaultdict(lambda:0)
-            for features, targets, inter_network_conn, _ in train_loader:
+
+            for features, pca_features, targets, inter_network_conn, _ in train_loader:
                 loss = 0
                 
                 optimizer.zero_grad()
@@ -399,6 +412,8 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
 
                 ## EMBEDDING OF THE REDUCED MATRIX
                 reduced_mat_embedding, reduced_mat_embedding_norm = model.encode_reduced_mat(embedded_feat_vectorized)
+                ## ADD PCA
+                reduced_mat_embedding_norm = reduced_mat_embedding_norm + nn.functional.normalize(pca_features, p=2, dim=1)
                 out_target_decoded = model.decode_targets(reduced_mat_embedding_norm)
 
                 ## RECONSTRUCT REDUCED MATRIX FROM EMBEDDING AND THE FULL MATRIX FROM REDUCED
@@ -421,6 +436,7 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
                     ## KERNLIZED LOSS: MAT embedding vs targets
                     kernel_embedded_target_loss, _ = criterion_ptt(reduced_mat_embedding_norm.unsqueeze(1), targets)
                     loss += kernel_embedded_target_loss
+                    
                     if cfg.network_loss:
                         kernel_embedded_network_loss, _ = criterion_pft(reduced_mat_embedding_norm.unsqueeze(1), inter_network_conn)
                         loss += kernel_embedded_network_loss
@@ -515,7 +531,7 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
             mape_batch = 0
             corr_batch = 0
             with torch.no_grad():
-                for features, targets, _, _ in val_loader:
+                for features, pca_features, targets, _, _ in val_loader:
 
                     features, targets, _, _ = filter_nans(features, targets)
                     
@@ -524,6 +540,7 @@ def train(train_ratio, train_dataset, val_dataset, B_init_fMRI, run_type, run_id
                     
                     reduced_mat = torch.tensor(sym_matrix_to_vec(reduced_mat.detach().cpu().numpy())).to(torch.float32).to(device)
                     embedding, embedding_norm = model.encode_reduced_mat(reduced_mat)
+                    embedding_norm = embedding_norm + nn.functional.normalize(pca_features, p=2, dim=1)
                     out_target_decoded = model.decode_targets(embedding_norm)
                     
                     epsilon = 1e-8
